@@ -61,6 +61,8 @@ Stockfish is always optional. When the binary is unavailable, the two Stockfish 
 
 Stockfish uses the UCI text protocol and is launched as a local subprocess. On Debian/Ubuntu install `stockfish` (usually `/usr/games/stockfish`); alternatively provide the absolute binary path in `STOCKFISH_PATH`. All engine requests are bounded and validated against `chess.js` before a piece moves.
 
+A `render.yaml` Blueprint supplies a **free preview** setup (Docker, health checks, Singapore region) when deployed from Render. Free Render web services sleep after inactivity, and their local game history is lost on restart. A paid instance with a disk, or an external persistent store, is required for durable history. This Blueprint deliberately avoids paid infrastructure by default.
+
 The provided Dockerfile installs Stockfish and the Node dependencies automatically. Engine availability is reported at `/health` and `/api/config`; no engine is silently substituted for the chosen match mode.
 
 ### Persistent hosting (without Termux)
