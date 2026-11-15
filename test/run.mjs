@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Chess } from 'chess.js';
 import { Arena } from '../src/game.mjs';
 import { rankLegalMoves, buildMoveMessages, requestMove } from '../src/bots.mjs';
+import { StockfishEngine, uciToSan } from '../src/stockfish.mjs';
 import { KeyPool } from '../src/keys.mjs';
 import { createGroqProvider } from '../src/provider.mjs';
 import { Store } from '../src/storage.mjs';
@@ -279,6 +280,78 @@ test('per-turn timeout is shared across retries', async () => {
   const res = await requestMove({ generate: slow, chess: new Chess(), side: 'w', name: 'W', opponent: 'B', budgetMs: 80, maxAttempts: 3 });
   assert.ok(Date.now() - started < 250, 'only one total timeout instead of three');
   assert.equal(res.forfeit, true);
+});
+
+test('UCI translation stays legal and promotion aware', () => {
+  assert.equal(uciToSan(new Chess(), 'e2e4'), 'e4');
+  assert.equal(uciToSan(new Chess(), 'e2e5'), null);
+  const promotion = new Chess('4k3/P7/8/8/8/8/8/4K3 w - - 0 1');
+  assert.equal(uciToSan(promotion, 'a7a8q'), 'a8=Q+');
+});
+
+test('Stockfish modes refuse missing engines without changing current state', async () => {
+  const arena = new Arena({ provider: createMockProvider(), refereeProvider: createMockProvider(), engine: new StockfishEngine(null) });
+  await assert.rejects(() => arena.start({ engineMode: 'assisted' }), /Stockfish is unavailable/);
+  await assert.rejects(() => arena.start({ engineMode: 'invented' }), /invalid chess strength mode/);
+  assert.equal(arena.snapshot().status, 'idle');
+});
+
+test('assisted mode corrects moves outside Stockfish shortlist and records origin', async () => {
+  const provider = {
+    async generate({ onDelta }) {
+      const t = 'MOVE: e4\nTHINK: my opening'; onDelta?.(t,t);
+      return { text: t };
+    },
+  };
+  const engine = {
+    available: true,
+    async analyze(fen) {
+      const white = new Chess(fen).turn() === 'w';
+      const best = white ? 'd4' : 'd5';
+      return { best, moves: [{ san: best }] };
+    },
+  };
+  const arena = new Arena({ provider, refereeProvider: provider, engine, config: {
+    refereeEnabled: false, plyDelayMs: 0, maxPlies: 2, timeControl: { baseMs: 0, incrementMs: 0 },
+  } });
+  const done = outcome(arena);
+  await arena.start({ white: { model: 'fake' }, black: { model: 'fake' }, engineMode: 'assisted' });
+  await done;
+  const state = arena.snapshot();
+  assert.equal(state.engineMode, 'assisted');
+  assert.equal(state.moves[0].san, 'd4');
+  assert.equal(state.moves[0].source, 'stockfish-override');
+  assert.equal(state.moves[1].san, 'd5');
+  assert.equal(state.moves[1].source, 'stockfish-override');
+  assert.equal(state.fens.length, 3, 'undo and replacement do not create phantom plies');
+  assert.equal(arena.chess.history().length, 2);
+});
+
+test('engine-only mode never asks the model for a move', async () => {
+  let calls = 0;
+  const provider = { async generate() { calls++; throw Error('model must not be used'); } };
+  const engine = { available: true, async analyze(fen) {
+    const best = new Chess(fen).turn() === 'w' ? 'e4' : 'e5';
+    return { best, moves: [{ san: best }] };
+  } };
+  const arena = new Arena({ provider, refereeProvider: provider, engine, config: {
+    refereeEnabled: false, plyDelayMs: 0, maxPlies: 2, timeControl: { baseMs: 0, incrementMs: 0 },
+  } });
+  const done = outcome(arena);
+  await arena.start({ white: { model: 'fake' }, black: { model: 'fake' }, engineMode: 'engine' });
+  await done;
+  assert.equal(calls, 0);
+  assert.deepEqual(arena.snapshot().moves.map((m) => m.source), ['stockfish', 'stockfish']);
+});
+
+test('native Stockfish returns a legal UCI move and alternatives', async () => {
+  const engine = new StockfishEngine();
+  if (!engine.available) return; // non-CI development hosts may not have the binary
+  const chess = new Chess();
+  const analysis = await engine.analyze(chess.fen(), { multiPv: 3, moveTimeMs: 160 });
+  assert.ok(chess.moves().includes(analysis.best));
+  assert.ok(analysis.moves.length >= 1 && analysis.moves.length <= 3);
+  assert.equal(analysis.moves[0].san, analysis.best);
 });
 
 /* -------------------------------------------------------------------- runner */
