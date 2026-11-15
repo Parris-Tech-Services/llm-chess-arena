@@ -1,0 +1,7 @@
+node_modules/
+keys.txt
+*.log
+.env
+data/
+.test-store-*/
+.dbgdata/

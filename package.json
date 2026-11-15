@@ -1,0 +1,25 @@
+{
+  "name": "llm-chess-arena",
+  "version": "2.0.0",
+  "description": "Two LLM bots play chess in real time with an LLM referee and a deterministic rules engine.",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "mock": "KEYS_FILE=/nonexistent node src/server.mjs",
+    "test": "node test/run.mjs",
+    "e2e": "node test/e2e.mjs",
+    "smoke": "node test/smoke.mjs",
+    "test:all": "node test/run.mjs && node test/e2e.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "chess.js": "^1.4.0"
+  },
+  "private": true
+}
