@@ -1,17 +1,18 @@
 import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
 import { Chess } from 'chess.js';
-import { requestMove } from './bots.mjs';
+import { requestMove, rankLegalMoves } from './bots.mjs';
 import { refereeRemark, refereeExplainRejection, refereeVerdict } from './referee.mjs';
 
 const DEFAULT_CONFIG = {
-  moveBudgetMs: 60_000,
+  moveBudgetMs: 35_000,
   maxAttempts: 3,
   maxPlies: 300,
   noProgressPlies: 80,
   plyDelayMs: 600,
   refereeEnabled: true,
-  playerMaxTokens: 800,
+  refereeEveryPlies: 4,
+  playerMaxTokens: 480,
   reasoningEffort: 'low',
   maxForcedMoves: 2,
   timeControl: { baseMs: 300_000, incrementMs: 1000 },
@@ -228,7 +229,7 @@ export class Arena extends EventEmitter {
           this.provider.generate({
             ...opts,
             model: player.model,
-            temperature: 0.6,
+            temperature: 0.15,
             maxTokens: this.config.playerMaxTokens,
             reasoningEffort: this.config.reasoningEffort,
             onDelta: (d, full) => this.emit('event', { type: 'stream', kind: 'commentary', side, delta: d, full }),
@@ -256,11 +257,10 @@ export class Arena extends EventEmitter {
         const canForce = res.forfeitKind === 'unparseable' && this.forced[side] < this.config.maxForcedMoves;
         if (canForce) {
           this.forced[side] += 1;
-          const legal = this.chess.moves({ verbose: true });
-          const pick = legal[Math.floor(Math.random() * legal.length)];
+          const pick = rankLegalMoves(this.chess)[0].move;
           this.chess.move(pick);
           res.san = pick.san;
-          res.think = '(no reply — arena played a legal move on the player’s behalf)';
+          res.think = '(no reply — arena chose a legal move using tactical screening)';
           this.emit('event', { type: 'log', level: 'warn', text: `No reply from ${player.name}; arena forced ${pick.san}` });
         } else {
           const winner = side === 'w' ? 'b' : 'w';
@@ -296,7 +296,7 @@ export class Arena extends EventEmitter {
 
       this.emit('event', { type: 'move', move: this.moves.at(-1), state: this.snapshot() });
 
-      if (this.config.refereeEnabled) this.scheduleReferee(res, side, Math.ceil(this.chess.history().length / 2));
+      if (this.config.refereeEnabled && this.moves.length % this.config.refereeEveryPlies === 0) this.scheduleReferee(res, side, Math.ceil(this.chess.history().length / 2));
 
       if (this.timed && this.clocks[side] <= 0) return this.finish(`${side === 'w' ? 'b' : 'w'}-wins`, 'time out');
 
