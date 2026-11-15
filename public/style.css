@@ -184,8 +184,9 @@ select:disabled { opacity: .5; }
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
   grid-template-rows: repeat(8, minmax(0, 1fr));
-  border-radius: 12px; overflow: hidden; position: relative;
-  box-shadow: 0 24px 60px -18px #000c, 0 0 0 1px #0006;
+  /* Straight edges make the 8×8 board visibly square, rather than a rounded card. */
+  border-radius: 0; overflow: hidden; position: relative;
+  box-shadow: 0 24px 60px -18px #000c, 0 0 0 2px color-mix(in srgb, var(--sq-dark) 70%, var(--line));
   touch-action: manipulation;
 }
 @media (max-width: 860px) {
