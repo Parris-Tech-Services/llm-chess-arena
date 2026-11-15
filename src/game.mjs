@@ -24,10 +24,11 @@ const DEFAULT_CONFIG = {
  * moves a piece, and private chain-of-thought is never stored or broadcast.
  */
 export class Arena extends EventEmitter {
-  constructor({ provider, refereeProvider, store, config = {} }) {
+  constructor({ provider, refereeProvider, store, engine = null, config = {} }) {
     super();
     this.provider = provider;
     this.refereeProvider = refereeProvider;
+    this.engine = engine;
     this.store = store;
     this.config = { ...DEFAULT_CONFIG, ...config, timeControl: { ...DEFAULT_CONFIG.timeControl, ...(config.timeControl || {}) } };
     this.reset();
@@ -41,6 +42,7 @@ export class Arena extends EventEmitter {
     this.fens = [this.chess.fen()];
     this.moves = [];
     this.status = 'idle';
+    this.engineMode = 'pure';
     this.result = null;
     this.reason = null;
     this.verdict = null;
@@ -79,12 +81,14 @@ export class Arena extends EventEmitter {
     return {
       id: this.id,
       status: this.status,
+      engineMode: this.engineMode,
       fen: this.chess.fen(),
       pgn: this.chess.pgn(),
       turn: this.chess.turn(),
       inCheck: this.chess.inCheck(),
       moves: this.moves,
       fens: this.fens,
+      engineMode: this.engineMode,
       players: this.publicPlayers,
       clocks: this.clocks,
       result: this.result,
@@ -168,9 +172,12 @@ export class Arena extends EventEmitter {
     this.persist().catch(() => {});
   }
 
-  async start({ white, black, referee, timeControl, pace } = {}) {
+  async start({ white, black, referee, timeControl, pace, engineMode = 'pure' } = {}) {
     if (this.status === 'playing' || this.status === 'paused') throw new Error('a game is already in progress');
+    if (!['pure', 'assisted', 'engine'].includes(engineMode)) throw new Error('invalid chess strength mode');
+    if (engineMode !== 'pure' && !this.engine?.available) throw new Error('Stockfish is unavailable on this host');
     this.reset();
+    this.engineMode = engineMode;
     this.id = crypto.randomUUID().slice(0, 8);
     this.players = {
       w: { name: white?.name || white?.model || 'White', model: white?.model },
@@ -184,7 +191,7 @@ export class Arena extends EventEmitter {
     this.status = 'playing';
     this.startedAt = Date.now();
     this.stopped = false;
-    this.emit('event', { type: 'log', text: `${this.players.w.name} (White) vs ${this.players.b.name} (Black) · referee ${this.players.referee.name}` });
+    this.emit('event', { type: 'log', text: `${this.players.w.name} (White) vs ${this.players.b.name} (Black) · ${engineMode} mode · referee ${this.players.referee.name}` });
     this.emitState();
     this.startTicker();
     const gen = this.gen;
@@ -224,31 +231,58 @@ export class Arena extends EventEmitter {
       this.emit('event', { type: 'turn', side, moveNumber: Math.floor(plies / 2) + 1 });
       this.moveStartedAt = Date.now();
 
-      const res = await requestMove({
-        generate: (opts) =>
-          this.provider.generate({
-            ...opts,
-            model: player.model,
-            temperature: 0.15,
-            maxTokens: this.config.playerMaxTokens,
-            reasoningEffort: this.config.reasoningEffort,
-            onDelta: (d, full) => this.emit('event', { type: 'stream', kind: 'commentary', side, delta: d, full }),
-          }),
-        chess: this.chess,
-        side,
-        name: player.name,
-        opponent: opponent.name,
-        budgetMs: this.timed ? Math.min(this.config.moveBudgetMs, Math.max(5000, this.clocks[side])) : this.config.moveBudgetMs,
-        maxAttempts: this.config.maxAttempts,
-        maxTokens: this.config.playerMaxTokens,
-        reasoningEffort: this.config.reasoningEffort,
-        refereeNote: this.refereeLog.at(-1)?.text,
-        onAttempt: (info) => {
-          this.rejections.push({ side, moveNumber: Math.floor(plies / 2) + 1, ...info, at: Date.now() });
-          this.emit('event', { type: 'rejection', side, reason: info.reason, text: `Rejected ${side === 'w' ? 'White' : 'Black'}: ${info.reason}` });
-          this.explainRejection(info, side);
-        },
-      });
+      const analysis = this.engineMode === 'pure' ? null : await this.engine.analyze(
+        this.chess.fen(), { multiPv: this.engineMode === 'assisted' ? 3 : 1, moveTimeMs: 180 },
+      );
+      const suggestions = analysis?.moves.map((m) => m.san) || [];
+      let res;
+      if (this.engineMode === 'engine') {
+        const played = this.chess.move(analysis.best);
+        res = { move: played, san: played.san, think: 'Stockfish selected this move.', attempts: 0, illegal: [], source: 'stockfish' };
+      } else {
+        res = await requestMove({
+          generate: (opts) =>
+            this.provider.generate({
+              ...opts,
+              model: player.model,
+              temperature: 0.15,
+              maxTokens: this.config.playerMaxTokens,
+              reasoningEffort: this.config.reasoningEffort,
+              onDelta: (d, full) => this.emit('event', { type: 'stream', kind: 'commentary', side, delta: d, full }),
+            }),
+          chess: this.chess,
+          side,
+          name: player.name,
+          opponent: opponent.name,
+          budgetMs: this.timed ? Math.min(this.config.moveBudgetMs, Math.max(5000, this.clocks[side])) : this.config.moveBudgetMs,
+          maxAttempts: this.config.maxAttempts,
+          maxTokens: this.config.playerMaxTokens,
+          reasoningEffort: this.config.reasoningEffort,
+          refereeNote: this.refereeLog.at(-1)?.text,
+          stockfishMoves: suggestions,
+          onAttempt: (info) => {
+            this.rejections.push({ side, moveNumber: Math.floor(plies / 2) + 1, ...info, at: Date.now() });
+            this.emit('event', { type: 'rejection', side, reason: info.reason, text: `Rejected ${side === 'w' ? 'White' : 'Black'}: ${info.reason}` });
+            this.explainRejection(info, side);
+          },
+        });
+        if (this.engineMode === 'assisted') {
+          if (res.move && suggestions.includes(res.san)) {
+            res.source = 'llm-stockfish-assisted';
+          } else {
+            // chess.js has already applied a legal LLM response: reverse it.
+            if (res.move) this.chess.undo();
+            const played = this.chess.move(analysis.best);
+            res = {
+              ...res, move: played, san: played.san, forfeit: false,
+              source: 'stockfish-override',
+              think: res.move ? 'Stockfish replaced a move outside its top choices.' : 'Stockfish rescued a missing or invalid model response.',
+            };
+          }
+        } else {
+          res.source = 'llm';
+        }
+      }
 
       if (this.stopped || gen !== this.gen) return;
       const elapsed = Date.now() - this.moveStartedAt;
@@ -261,6 +295,7 @@ export class Arena extends EventEmitter {
           this.chess.move(pick);
           res.san = pick.san;
           res.think = '(no reply — arena chose a legal move using tactical screening)';
+          res.source = 'heuristic-fallback';
           this.emit('event', { type: 'log', level: 'warn', text: `No reply from ${player.name}; arena forced ${pick.san}` });
         } else {
           const winner = side === 'w' ? 'b' : 'w';
@@ -289,6 +324,7 @@ export class Arena extends EventEmitter {
         piece: last.piece,
         captured: last.captured || null,
         think: res.think,
+        source: res.source || 'llm',
         attempts: res.attempts,
         ms: elapsed,
       });
@@ -296,7 +332,7 @@ export class Arena extends EventEmitter {
 
       this.emit('event', { type: 'move', move: this.moves.at(-1), state: this.snapshot() });
 
-      if (this.config.refereeEnabled && this.moves.length % this.config.refereeEveryPlies === 0) this.scheduleReferee(res, side, Math.ceil(this.chess.history().length / 2));
+      if (this.config.refereeEnabled && this.engineMode !== 'engine' && this.moves.length % this.config.refereeEveryPlies === 0) this.scheduleReferee(res, side, Math.ceil(this.chess.history().length / 2));
 
       if (this.timed && this.clocks[side] <= 0) return this.finish(`${side === 'w' ? 'b' : 'w'}-wins`, 'time out');
 
@@ -337,7 +373,7 @@ export class Arena extends EventEmitter {
   }
 
   explainRejection(info, side) {
-    if (!this.config.refereeEnabled) return;
+    if (!this.config.refereeEnabled || this.engineMode === 'engine') return;
     const key = `${side}:${this.moves.length}:${info.attempt}`;
     if (this._explainLocks.has(key)) return;
     this._explainLocks.add(key);
@@ -389,7 +425,7 @@ export class Arena extends EventEmitter {
     this.emit('event', { type: 'log', text: `Game over: ${result} (${reason})` });
     this.emitState();
 
-    if (this.config.refereeEnabled) {
+    if (this.config.refereeEnabled && this.engineMode !== 'engine') {
       let verdict = { verdict: 'unknown', conduct: 'unknown', note: 'referee did not respond' };
       try {
         await (this.refereePending || Promise.resolve());
@@ -424,6 +460,7 @@ export class Arena extends EventEmitter {
       fen: this.chess.fen(),
       moves: this.moves,
       fens: this.fens,
+      engineMode: this.engineMode,
       players: this.publicPlayers,
       clocks: this.clocks,
       timeControl: this.config.timeControl,
@@ -475,6 +512,7 @@ export class Arena extends EventEmitter {
     // Deep copies: a restored game must never mutate the record it came from.
     const clone = (v) => (v === undefined ? undefined : structuredClone(v));
     this.players = clone(record.players);
+    this.engineMode = record.engineMode || 'pure';
     this.moves = clone(record.moves) || [];
     this.refereeLog = clone(record.refereeLog) || [];
     this.rejections = clone(record.rejections) || [];
@@ -502,7 +540,7 @@ export class Arena extends EventEmitter {
   }
 
   resumeInterrupted() {
-    if (!this.interrupted) return false;
+    if (!this.interrupted || (this.engineMode !== 'pure' && !this.engine?.available)) return false;
     this.interrupted = false;
     this.status = 'playing';
     this.emit('event', { type: 'log', text: 'Resuming interrupted game' });

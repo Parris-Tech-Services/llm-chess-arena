@@ -48,6 +48,9 @@ test('static assets and security headers', async () => {
   const page = await get('/');
   assert.equal(page.status, 200);
   assert.match(page.text, /<title>LLM Chess Arena/);
+  assert.match(page.text, /id="moveBackBtn"/);
+  assert.match(page.text, /id="moveForwardBtn"/);
+  assert.match(page.text, /id="engineMode"/);
   assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
   assert.match(page.headers.get('content-security-policy') || '', /script-src 'self'/);
   for (const asset of ['/style.css', '/app.js', '/favicon.svg']) {
@@ -66,6 +69,7 @@ test('health and config never leak secrets', async () => {
   const cfg = JSON.parse((await get('/api/config')).text);
   assert.ok(Array.isArray(cfg.models));
   assert.equal(cfg.mode, 'mock');
+  assert.deepEqual(cfg.stockfish.modes, cfg.stockfish.available ? ['pure', 'assisted', 'engine'] : ['pure']);
 
   const keys = await get('/api/keys');
   assert.ok(!/gsk_/.test(keys.text), 'no key material in /api/keys');
@@ -157,6 +161,26 @@ test('completed games, standings, replay and PGN', async () => {
   // Elo is conserved across a game (a draw leaves both at base).
   const total = standings.rows.reduce((n, r) => n + r.rating, 0);
   assert.ok(Math.abs(total - 1200 * standings.rows.length) < 2, `ratings conserve: ${total}`);
+});
+
+test('Stockfish engine-only match uses validated moves and preserves history', async () => {
+  const cfg = JSON.parse((await get('/api/config')).text);
+  if (!cfg.stockfish.available) {
+    const r = await post('/api/start', { engineMode: 'engine' });
+    assert.equal(r.status, 409, 'no engine means no silently downgraded mode');
+    return;
+  }
+  const started = await post('/api/start', { engineMode: 'engine', timeControl: { baseMs: 0, incrementMs: 0 }, pace: 50 });
+  assert.equal(started.status, 202, JSON.stringify(started.json));
+  await waitFor(async () => {
+    const s = JSON.parse((await get('/api/state')).text);
+    return s.moves.length >= 2;
+  }, 15_000, 'Stockfish two plies');
+  const s = JSON.parse((await get('/api/state')).text);
+  assert.equal(s.engineMode, 'engine');
+  assert.equal(s.moves[0].source, 'stockfish');
+  assert.equal(s.fens.length, s.moves.length + 1);
+  await post('/api/stop');
 });
 
 test('input validation and rate limits', async () => {

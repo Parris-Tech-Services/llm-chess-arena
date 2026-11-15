@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Arena } from './game.mjs';
+import { StockfishEngine } from './stockfish.mjs';
 import { KeyPool } from './keys.mjs';
 import { createGroqProvider } from './provider.mjs';
 import { listModels } from './groq.mjs';
@@ -43,11 +44,13 @@ if (mode === 'mock') console.warn('[arena] running in mock mode — no credentia
 const mock = createMockProvider();
 const provider = keyPool ? createGroqProvider(keyPool) : mock;
 const refereeProvider = keyPool ? createGroqProvider(keyPool) : mock;
+const engine = new StockfishEngine();
+console.log(`[arena] Stockfish ${engine.available ? 'available' : 'unavailable — pure LLM only'}`);
 
 const arena = new Arena({
-  provider, refereeProvider, store,
+  provider, refereeProvider, engine, store,
   config: {
-    moveBudgetMs: Number(process.env.MOVE_BUDGET_MS || 60_000),
+    moveBudgetMs: Number(process.env.MOVE_BUDGET_MS || 35_000),
     plyDelayMs: Number(process.env.PLY_DELAY_MS || 700),
     timeControl: {
       baseMs: Number(process.env.CLOCK_BASE_MS || 300_000),
@@ -178,6 +181,7 @@ const server = http.createServer(async (req, res) => {
       const s = arena.snapshot();
       return json(res, 200, {
         ok: true, version: VERSION, uptimeSec: Math.round(process.uptime()), mode,
+        stockfish: { available: engine.available },
         game: { id: s.id, status: s.status, plies: s.moves.length, result: s.result },
         models: catalogue.models.length,
         keys: keyPool ? { total: keyPool.size, available: keyPool.stats().filter((k) => !k.disabled && !k.cooling).length } : null,
@@ -211,11 +215,13 @@ const server = http.createServer(async (req, res) => {
       const models = await getModels();
       return json(res, 200, {
         mode, version: VERSION,
+        stockfish: { available: engine.available, modes: engine.available ? ['pure', 'assisted', 'engine'] : ['pure'] },
         models: models.filter((m) => PLAYABLE(m.id)).map((m) => ({ id: m.id, context: m.context })),
         defaults: {
           white: 'openai/gpt-oss-120b',
           black: 'qwen/qwen3.8-27b',
           referee: 'openai/gpt-oss-20b',
+          engineMode: 'pure',
           timeControl: arena.config.timeControl,
           pace: arena.config.plyDelayMs,
         },
@@ -266,6 +272,7 @@ const server = http.createServer(async (req, res) => {
           white: { model: last.b.model, name: last.b.name },
           black: { model: last.w.model, name: last.w.name },
           referee: { model: last.referee.model, name: last.referee.name },
+          engineMode: arena.engineMode,
         };
       } else {
         try { body = await readBody(req); } catch (err) { return json(res, err.status || 400, { error: err.message }); }
@@ -278,11 +285,11 @@ const server = http.createServer(async (req, res) => {
         : undefined;
       const pace = body.pace === undefined ? undefined : Number(body.pace);
       try {
-        await arena.start({ white, black, referee, timeControl: tc, pace });
+        await arena.start({ white, black, referee, timeControl: tc, pace, engineMode: body.engineMode || 'pure' });
       } catch (err) {
         return json(res, 409, { error: err.message });
       }
-      return json(res, 202, { id: arena.id, white, black, referee });
+      return json(res, 202, { id: arena.id, white, black, referee, engineMode: arena.engineMode });
     }
 
     if (p === '/api/pause') return json(res, 200, { paused: arena.pause() });

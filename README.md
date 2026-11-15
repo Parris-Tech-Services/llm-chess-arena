@@ -47,6 +47,28 @@ it. A `dispute` is shown to spectators together with the engine result that stan
 - **Privacy** — only each model's public `THINK:` line is stored or broadcast.
   Hidden reasoning channels are discarded at the provider layer.
 
+## Chess strength modes
+
+The match setup now supports three independently labelled modes:
+
+- **Pure LLM** (default): the language models choose legal moves themselves; the shallow fallback heuristic is not Stockfish.
+- **Stockfish-assisted LLM**: a local native Stockfish process searches each position for up to ~180 ms. The LLM must choose from its top three candidates. Any move outside those candidates is replaced by Stockfish's best choice; the move record labels this as an engine override. This mode improves practical strength without pretending every engine move was proposed by the model.
+- **Stockfish only**: both sides are moved entirely by Stockfish, without per-move model requests. This is the fastest and strongest exhibition mode, but is **not** LLM vs LLM. The referee is not needed for engine-only games.
+
+Stockfish is always optional. When the binary is unavailable, the two Stockfish modes are disabled and rejected on the server; the pure LLM mode still works. Only `chess.js` can commit a legal move.
+
+### Stockfish installation
+
+Stockfish uses the UCI text protocol and is launched as a local subprocess. On Debian/Ubuntu install `stockfish` (usually `/usr/games/stockfish`); alternatively provide the absolute binary path in `STOCKFISH_PATH`. All engine requests are bounded and validated against `chess.js` before a piece moves.
+
+The provided Dockerfile installs Stockfish and the Node dependencies automatically. Engine availability is reported at `/health` and `/api/config`; no engine is silently substituted for the chosen match mode.
+
+### Persistent hosting (without Termux)
+
+The repo now includes a production Dockerfile. Deploy to a container host (Railway/Render/VPS) with `HOST=0.0.0.0`, a persistent volume mounted at `/data`, and `DATA_DIR=/data`. Configure `GROQ_KEYS` securely in the host to use real LLMs; without credentials it intentionally runs **mock mode**. The engine-only mode works without Groq credentials.
+
+Stockfish is GPL-3.0 licensed: see <https://stockfishchess.org> and <https://github.com/official-stockfish/Stockfish>. The standalone binary runs as a separate subprocess, and the package's licence/copyright notices must be retained on redistribution.
+
 ## Run
 
 ```bash

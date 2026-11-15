@@ -52,7 +52,7 @@ export function rankLegalMoves(chess) {
   }).sort((a, b) => b.score - a.score || a.move.san.localeCompare(b.move.san));
 }
 
-export function buildMoveMessages({ chess, side, name, opponent, note }) {
+export function buildMoveMessages({ chess, side, name, opponent, note, stockfishMoves = [] }) {
   const legal = chess.moves({ verbose: true });
   const legalSan = legal.map((m) => m.san).join(', ');
   const candidates = rankLegalMoves(chess).slice(0, 5).map(({ move }) => move.san).join(', ');
@@ -62,7 +62,7 @@ export function buildMoveMessages({ chess, side, name, opponent, note }) {
     'Play sound competitive chess, not random or theatrical chess.',
     'Before choosing, check immediate mate threats, forcing checks/captures, hanging pieces, and opponent recaptures.',
     'Prefer safe development, centre control, and king safety; avoid speculative early queen sorties.',
-    'Tactical candidates are a shallow heuristic, not an engine verdict. Any legal move is allowed.',
+    stockfishMoves.length ? 'Stockfish has searched this position. Choose ONLY one of the STOCKFISH SHORTLIST moves below.' : 'Tactical candidates are a shallow heuristic, not an engine verdict. Any legal move is allowed.',
     '',
     'Reply in exactly two short lines, with MOVE FIRST:',
     'MOVE: <one legal SAN move copied exactly from the list>',
@@ -80,7 +80,7 @@ export function buildMoveMessages({ chess, side, name, opponent, note }) {
     `Move history: ${historyLine(chess) || '(none)'}`,
     '',
     `LEGAL MOVES (SAN): ${legalSan}`,
-    `TACTICAL CANDIDATES (approximate): ${candidates}`,
+    ...(stockfishMoves.length ? [`STOCKFISH SHORTLIST (best first): ${stockfishMoves.join(', ')}`] : [`TACTICAL CANDIDATES (approximate): ${candidates}`]),
     '',
     note ? `REFEREE NOTE (non-binding): ${note.slice(0, 100)}` : '',
     'Give MOVE first (spectators watch the board update live), then THINK.',
@@ -130,7 +130,7 @@ function tryApply(chess, token) {
 export async function requestMove({
   generate, chess, side, name, opponent,
   budgetMs = 30_000, maxAttempts = 3, maxTokens = 480, reasoningEffort = 'low',
-  onDelta, onAttempt, refereeNote,
+  onDelta, onAttempt, refereeNote, stockfishMoves = [],
 }) {
   const illegal = [];
   let lastText = '';
@@ -143,14 +143,14 @@ export async function requestMove({
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) break;
     attemptsMade = attempt;
-    const messages = buildMoveMessages({ chess, side, name, opponent, note: refereeNote });
+    const messages = buildMoveMessages({ chess, side, name, opponent, note: refereeNote, stockfishMoves });
     if (attempt > 1) {
       messages.push({ role: 'assistant', content: lastText || 'MOVE: (none)' });
       messages.push({
         role: 'user',
         content:
           `That move was rejected by the referee: "${illegal.at(-1)}". ` +
-          `You may ONLY play one of these legal moves: ${chess.moves().join(', ')}. ` +
+          `You may ONLY play one of these moves: ${(stockfishMoves.length ? stockfishMoves : chess.moves()).join(', ')}. ` +
           'Reply again with MOVE: and THINK: only.',
       });
     }
