@@ -170,20 +170,30 @@ select:disabled { opacity: .5; }
 }
 .clock.low { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 
-.board-wrap { position: relative; display: grid; place-items: center; }
+/* Keep the board itself and every individual chess square exactly 1:1.
+   Never constrain its width using viewport height: short mobile viewports
+   should scroll rather than squeeze the board into a tiny strip. */
+.board-wrap { position: relative; display: flex; justify-content: center; width: 100%; min-width: 0; }
 .board {
-  width: min(100%, calc(100vh - 330px), 620px);
-  aspect-ratio: 1; display: grid; grid-template-columns: repeat(8, 1fr);
+  width: min(100%, 620px);
+  aspect-ratio: 1 / 1;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
   border-radius: 12px; overflow: hidden; position: relative;
   box-shadow: 0 24px 60px -18px #000c, 0 0 0 1px #0006;
   touch-action: manipulation;
 }
 @media (max-width: 860px) {
-  .board { width: min(100%, calc(100vh - 300px)); max-width: 520px; }
+  .board { width: 100%; max-width: 620px; }
 }
-@media (max-height: 720px) and (min-width: 861px) { .board { width: min(100%, calc(100vh - 290px)); } }
 .sq {
   position: relative; display: grid; place-items: center; user-select: none;
+  min-width: 0; min-height: 0; aspect-ratio: 1 / 1;
   font-size: clamp(20px, 5.1vh, 46px); line-height: 1;
 }
 .sq.light { background: var(--sq-light); color: var(--sq-light-txt); }
