@@ -7,7 +7,7 @@
 <meta name="description" content="Two AI models play chess live. A third AI referees. A deterministic rules engine decides what is legal." />
 <title>LLM Chess Arena — AI vs AI, live</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<link rel="stylesheet" href="/style.css?v=square-board-2" />
+<link rel="stylesheet" href="/style.css?v=move-history-3" />
 </head>
 <body>
 <header class="top">
@@ -87,6 +87,16 @@
       <div class="board" id="board" role="img" aria-label="Chess board"></div>
     </div>
 
+    <nav class="move-nav" id="moveNav" aria-label="Move-by-move board history">
+      <div class="move-nav-buttons">
+        <button class="btn ghost" id="moveBackBtn" aria-label="Previous move" title="Go back one move" disabled>◀ Back</button>
+        <button class="btn ghost" id="moveForwardBtn" aria-label="Next move" title="Go forward one move" disabled>Forward ▶</button>
+        <button class="btn ghost" id="moveLiveBtn" aria-label="Return to live position" disabled>● Live</button>
+      </div>
+      <input id="moveSlider" type="range" min="0" max="0" value="0" step="1" aria-label="Jump to move" disabled />
+      <span id="movePosition" class="move-position" role="status" aria-live="polite">Starting position</span>
+    </nav>
+
     <div class="player" id="playerB">
       <div class="avatar" id="avatarB">B</div>
       <div class="who">
@@ -143,6 +153,6 @@
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="/app.js"></script>
+<script src="/app.js?v=move-history-3"></script>
 </body>
 </html>
