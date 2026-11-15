@@ -221,8 +221,11 @@ function renderPlayers(state) {
   $('nameB').textContent = p.b?.name || 'Black';
   $('avatarW').textContent = initials(p.w?.name || 'White');
   $('avatarB').textContent = initials(p.b?.name || 'Black');
-  $('modelW').textContent = p.w?.model || 'not set';
-  $('modelB').textContent = p.b?.model || 'not set';
+  const modelLabel = (p) => state.engineMode === 'engine' ? 'Stockfish · engine only'
+    : state.engineMode === 'assisted' ? (p?.model || 'LLM') + ' + Stockfish'
+    : (p?.model || 'not set');
+  $('modelW').textContent = modelLabel(p.w);
+  $('modelB').textContent = modelLabel(p.b);
   $('playerW').classList.toggle('active', state.status === 'playing' && state.turn === 'w');
   $('playerB').classList.toggle('active', state.status === 'playing' && state.turn === 'b');
   $('clockW').textContent = state.timeControl?.baseMs ? fmtClock(state.clocks?.w) : '∞';
@@ -305,7 +308,7 @@ function renderMoves(state) {
   box.innerHTML = moves.map((m, i) => `<div class="mv${i + 1 === selected ? ' viewed' : ''}" data-ply="${i + 1}">
       <span class="no">${m.side === 'w' ? Math.floor(i / 2) + 1 + '.' : ''}</span>
       <span class="san">${esc(m.san)}</span>
-      <span class="why" title="${esc(m.think || '')}">${esc(m.think || '')}</span>
+      <span class="why" title="${esc((m.source || 'llm') + ': ' + (m.think || ''))}">${esc(m.source && m.source !== 'llm' ? '[' + m.source.replaceAll('-', ' ') + '] ' : '')}${esc(m.think || '')}</span>
     </div>`).join('');
 }
 
@@ -403,6 +406,10 @@ async function loadConfig() {
     fill($('whiteModel'), S.config.defaults.white);
     fill($('blackModel'), S.config.defaults.black);
     fill($('refereeModel'), S.config.defaults.referee);
+    const available = !!S.config.stockfish?.available;
+    for (const option of $('engineMode').options) option.disabled = option.value !== 'pure' && !available;
+    $('engineMode').value = 'pure';
+    if (!available) $('engineHelp').textContent = 'Stockfish is not installed on this host. Pure LLM mode remains available.';
     refreshKeys();
   } catch (err) {
     showBanner(`Could not load model catalogue: ${err.message}`);
@@ -632,7 +639,7 @@ function handleEvent(e) {
       tag: e.move.side === 'w' ? 'W' : 'B',
       tagClass: e.move.side,
       text: e.move.think || e.move.san,
-      meta: `${Math.floor((e.move.n - 1) / 2) + 1}${e.move.side === 'w' ? '.' : '…'} ${e.move.san}${e.move.ms ? ` · ${(e.move.ms / 1000).toFixed(1)}s` : ''}`,
+      meta: `${Math.floor((e.move.n - 1) / 2) + 1}${e.move.side === 'w' ? '.' : '…'} ${e.move.san}${e.move.ms ? ` · ${(e.move.ms / 1000).toFixed(1)}s` : ''}${e.move.source && e.move.source !== 'llm' ? ` · ${e.move.source}` : ''}`,
     });
     return;
   }
@@ -682,6 +689,7 @@ function currentSetup() {
     referee: { model: $('refereeModel').value, name: short($('refereeModel').value) },
     timeControl: { baseMs: base, incrementMs: inc },
     pace: Number($('paceSel').value),
+    engineMode: $('engineMode').value,
   };
 }
 
@@ -689,7 +697,7 @@ $('startBtn').onclick = async () => {
   $('resultCard').hidden = true;
   showBanner('');
   const r = await post('/api/start', currentSetup());
-  if (r) toast(`Match started · ${short(r.white.model)} vs ${short(r.black.model)}`);
+  if (r) toast(`Match started · ${r.engineMode === 'engine' ? 'Stockfish only' : `${short(r.white.model)} vs ${short(r.black.model)}`} · ${r.engineMode}`);
 };
 $('pauseBtn').onclick = () => post('/api/pause');
 $('resumeBtn').onclick = async () => {
@@ -753,6 +761,7 @@ async function initReplay(id) {
     S.viewPly = null;
     S.state = {
       status: 'finished',
+      engineMode: game.engineMode || 'pure',
       fen: game.fen,
       pgn: game.pgn,
       moves: game.moves,
