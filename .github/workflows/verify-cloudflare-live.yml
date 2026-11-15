@@ -1,0 +1,47 @@
+name: Verify autonomous Cloudflare chess live
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-cloudflare-live.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE: https://llm-chess-arena.parris-neathaustralia.workers.dev
+    steps:
+      - name: Verify independent backend and square frontend
+        run: |
+          set -eu
+          curl -fsS --retry 3 "$BASE/health" > /tmp/health.json
+          node -e "const h=require('/tmp/health.json');if(!h.ok||h.mode!=='cloudflare-ai'||!h.independentOfPhone)process.exit(1);console.log('HEALTH',JSON.stringify(h))"
+          curl -fsS --retry 3 "$BASE/" > /tmp/index.html
+          grep -q 'LLM Chess Arena' /tmp/index.html
+          curl -fsS --retry 3 "$BASE/style.css" > /tmp/style.css
+          grep -q 'grid-template-rows:repeat(8' /tmp/style.css
+          curl -fsS --retry 3 "$BASE/api/config" > /tmp/config.json
+          node -e "const c=require('/tmp/config.json');if(!c.models.some(x=>x.id.startsWith('@cf/')))process.exit(1);console.log('MODELS',c.models.map(x=>x.id))"
+      - name: Start live real-AI exhibition through public HTTPS
+        run: |
+          set -eu
+          curl -sS -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/start" -H 'content-type: application/json' -d '{"timeControl":{"baseMs":0,"incrementMs":0},"pace":300}' > /tmp/start.code
+          cat /tmp/start.json
+          status=$(cat /tmp/start.code)
+          if [ "$status" != "202" ] && [ "$status" != "409" ]; then echo "Unexpected start response HTTP $status"; exit 1; fi
+      - name: Prove board changes from actual provider moves
+        run: |
+          set -eu
+          for i in $(seq 1 24); do
+            curl -fsS "$BASE/api/state" > /tmp/state.json
+            if node -e "const s=require('/tmp/state.json');if(s.moves.length<1)process.exit(1);if(s.moves.some(m=>!m.san))process.exit(2);console.log('LIVE',JSON.stringify({id:s.id,status:s.status,plies:s.moves.length,first:s.moves[0]?.san,white:s.players.w.model,black:s.players.b.model,referee:s.players.referee.model,comment:s.moves[0]?.think?.slice(0,100)}))"; then
+              echo 'VERIFIED: Cloudflare-hosted AI chess game produced a legal board move.'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'FAILED: no real AI move appeared within two minutes'
+          cat /tmp/state.json
+          exit 1
