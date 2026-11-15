@@ -193,9 +193,14 @@ const server = http.createServer(async (req, res) => {
         'x-accel-buffering': 'no',
       });
       res.write('retry: 3000\n');
+      // Proxies (including Cloudflare tunnels) buffer small responses. A padding
+      // comment larger than the usual buffer threshold makes frames flow at once.
+      res.write(`: ${' '.repeat(8192)}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'state', state: arena.snapshot() })}\n\n`);
       clients.add(res);
-      const beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 15_000);
+      const beat = setInterval(() => {
+        try { res.write(`: keep-alive ${' '.repeat(2048)}\n\n`); } catch { /* closed */ }
+      }, 15_000);
       req.on('close', () => { clearInterval(beat); clients.delete(res); });
       return;
     }

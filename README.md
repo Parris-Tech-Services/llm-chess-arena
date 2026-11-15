@@ -122,3 +122,11 @@ SSE requires buffering to be disabled (`X-Accel-Buffering: no` is already sent).
 ## Licence
 
 MIT.
+
+## Transport note
+
+SSE is the fast path (token-level commentary). Cloudflare's account-less
+`trycloudflare.com` tunnel buffers event streams, so the client watches for
+silence and automatically falls back to 1.5 s state polling. Both transports
+render the same moves, clocks, commentary and referee log — polling simply
+delivers commentary once per move instead of token by token.

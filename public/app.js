@@ -437,22 +437,58 @@ function toast(text) {
 
 /* ---------------------------------------------------------------------- SSE */
 let es = null;
+let pollTimer = null;
+let lastEventAt = 0;
+let watchdog = null;
+
+/**
+ * SSE is the fast path, but some proxies buffer event streams completely.
+ * If nothing arrives quickly, fall back to state polling so the arena still
+ * works everywhere (moves, clocks, commentary and referee arrive per poll).
+ */
+function startPolling() {
+  if (pollTimer) return;
+  if (es) { es.close(); es = null; }
+  S.connected = true;
+  S.polling = true;
+  showBanner('');
+  const tick = async () => {
+    try {
+      const state = await fetchJson('/api/state');
+      handleEvent({ type: 'state', state });
+    } catch {
+      showBanner('Connection lost — retrying…');
+    }
+  };
+  tick();
+  pollTimer = setInterval(tick, 1500);
+}
+
 function connect() {
   if (es) es.close();
+  lastEventAt = Date.now();
   es = new EventSource('/events');
   es.onopen = () => {
     S.connected = true;
-    showBanner('');
+    if (!S.polling) showBanner('');
   };
   es.onerror = () => {
     S.connected = false;
-    showBanner('Connection lost — reconnecting…');
+    if (!S.polling) showBanner('Connection lost — reconnecting…');
+    // Repeated failures: switch transport rather than spin.
+    if (Date.now() - lastEventAt > 8000) startPolling();
   };
   es.onmessage = (msg) => {
+    lastEventAt = Date.now();
+    if (S.polling) return;
     let e;
     try { e = JSON.parse(msg.data); } catch { return; }
     handleEvent(e);
   };
+  clearTimeout(watchdog);
+  watchdog = setTimeout(() => {
+    if (Date.now() - lastEventAt > 4500 && !S.polling) startPolling();
+  }, 5000);
 }
 
 function handleEvent(e) {
@@ -460,6 +496,21 @@ function handleEvent(e) {
     const prev = S.state;
     S.state = e.state;
     const isNewGame = !prev || prev.id !== e.state.id;
+    // Polling transports deliver moves inside the snapshot rather than as
+    // 'move' events, so keep the feed and sound in sync from state alone.
+    if (!isNewGame && prev && e.state.moves.length !== prev.moves.length) {
+      const grew = e.state.moves.length > prev.moves.length;
+      if (grew) {
+        const m = e.state.moves[e.state.moves.length - 1];
+        blip(m.captured ? 'capture' : m.san.includes('+') || m.san.includes('#') ? 'check' : 'move');
+      }
+      rebuildFeed(e.state);
+      renderMoves(e.state);
+      if (e.state.status === 'playing') {
+        const modelEl = e.state.turn === 'w' ? $('modelW') : $('modelB');
+        if (modelEl) modelEl.textContent = e.state.players[e.state.turn]?.model || '';
+      }
+    }
     if (isNewGame) {
       S.feed = [];
       S.finishedHandled = false;
@@ -702,4 +753,7 @@ if (location.pathname.startsWith('/g/')) {
   connect();
   setInterval(refreshKeys, 20000);
 }
-window.addEventListener('beforeunload', () => es && es.close());
+window.addEventListener('beforeunload', () => {
+  if (es) es.close();
+  if (pollTimer) clearInterval(pollTimer);
+});
