@@ -1,0 +1,37 @@
+name: Build Cloudflare chess arena
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/arena.mjs'
+      - 'src/rating.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-cloudflare.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Bundle chess.js and the autonomous game engine
+        run: npx --yes esbuild@0.25.12 worker/arena.mjs --bundle --platform=browser --format=esm --target=es2022 --minify --outfile=worker/dist/arena.js --legal-comments=inline
+      - name: Commit portable Cloudflare Worker bundle
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/dist/arena.js
+          if ! git diff --staged --quiet; then
+            git commit -m "build(worker): bundle autonomous chess service"
+            git push
+          fi
