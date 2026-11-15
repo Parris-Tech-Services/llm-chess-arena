@@ -1,6 +1,12 @@
 import { streamChat } from './groq.mjs';
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) return reject(signal.reason || new Error('aborted'));
+  const timer = setTimeout(finish, ms);
+  function finish() { signal?.removeEventListener('abort', abort); resolve(); }
+  function abort() { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(signal.reason || new Error('aborted')); }
+  signal?.addEventListener('abort', abort, { once: true });
+});
 const isBudgetError = (err) =>
   err?.status === 429 && /max_tokens|request too large|output tokens per minute|OTPM/i.test(err.message || '');
 
@@ -24,7 +30,7 @@ export function createGroqProvider(pool, { maxAttemptsPerMove = 6 } = {}) {
         } catch (err) {
           const wait = Math.min(err.retryAfterMs ?? 5000, 30_000);
           if (wait <= 0) throw err;
-          await sleep(wait);
+          await sleep(wait, signal);
           lastErr = err;
           attempts += 1;
           continue;
@@ -44,7 +50,7 @@ export function createGroqProvider(pool, { maxAttemptsPerMove = 6 } = {}) {
           pool.report(key, { status: err.kind || 'error', retryAfterMs: err.retryAfterMs, message: err.message });
           lastErr = err;
           attempts += 1;
-          await sleep(250 * attempts);
+          await sleep(250 * attempts, signal);
         }
       }
       throw lastErr || new Error('no key could serve the request');
