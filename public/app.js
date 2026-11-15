@@ -32,7 +32,7 @@ const S = {
   liveReferee: '',
   streams: { w: '', b: '' },
   replay: null,
-  replayIndex: 0,
+  viewPly: null, // null follows the newest move; a number freezes the board at that ply
   connected: false,
   finishedHandled: false,
 };
@@ -157,6 +157,57 @@ function statusInfo(state) {
   return { cls: '', text: state.status };
 }
 
+function moveHistory(state) {
+  const fens = state?.fens || S.replay?.fens || [];
+  const total = state?.moves?.length || 0;
+  return { fens, total, available: fens.length >= total + 1 };
+}
+
+function viewedPly(state) {
+  const { total } = moveHistory(state);
+  return S.viewPly === null ? total : Math.max(0, Math.min(total, S.viewPly));
+}
+
+// Navigation only changes the spectator's displayed position, never the live game.
+function navigateTo(ply) {
+  const { total, available } = moveHistory(S.state);
+  if (!available) return;
+  S.viewPly = ply >= total ? null : Math.max(0, ply);
+  renderPosition(false);
+  renderMoves(S.state);
+}
+
+function renderPosition(animate = false) {
+  if (!S.state) return;
+  const { fens, total, available } = moveHistory(S.state);
+  const index = viewedPly(S.state);
+  const moves = S.state.moves || [];
+  if (available) {
+    const shown = moves.slice(0, index);
+    const atEnd = index === total;
+    const lastSan = shown.at(-1)?.san || '';
+    renderBoard({
+      ...S.state,
+      fen: fens[index],
+      moves: shown,
+      turn: index % 2 === 0 ? 'w' : 'b',
+      inCheck: atEnd ? S.state.inCheck || /[+#]$/.test(lastSan) : /[+#]$/.test(lastSan),
+    }, animate && atEnd);
+  } else {
+    renderBoard(S.state, animate);
+  }
+  $('moveSlider').max = String(total);
+  $('moveSlider').value = String(index);
+  $('moveSlider').disabled = !available || total === 0;
+  $('moveBackBtn').disabled = !available || index === 0;
+  $('moveForwardBtn').disabled = !available || index >= total;
+  $('moveLiveBtn').disabled = !available || S.viewPly === null;
+  const last = moves[index - 1];
+  const moveLabel = last ? `${Math.floor((index - 1) / 2) + 1}${last.side === 'w' ? '.' : '…'} ${last.san}` : 'Starting position';
+  $('movePosition').textContent = `${index} / ${total} · ${moveLabel}${index < total ? ' · LIVE CONTINUES' : ' · Latest'}`;
+  $('movePosition').classList.toggle('behind', index < total);
+}
+
 function renderStatus(state) {
   const info = statusInfo(state);
   const pill = $('statusPill');
@@ -250,7 +301,8 @@ function renderMoves(state) {
     box.innerHTML = '<div class="empty">No moves yet.</div>';
     return;
   }
-  box.innerHTML = moves.map((m, i) => `<div class="mv">
+  const selected = viewedPly(state);
+  box.innerHTML = moves.map((m, i) => `<div class="mv${i + 1 === selected ? ' viewed' : ''}" data-ply="${i + 1}">
       <span class="no">${m.side === 'w' ? Math.floor(i / 2) + 1 + '.' : ''}</span>
       <span class="san">${esc(m.san)}</span>
       <span class="why" title="${esc(m.think || '')}">${esc(m.think || '')}</span>
@@ -311,7 +363,7 @@ function renderAll(animate = false) {
   if (!state) return;
   renderStatus(state);
   renderPlayers(state);
-  renderBoard(state, animate);
+  renderPosition(animate);
   renderMoves(state);
   updateControls(state);
   renderVerdict(state);
@@ -517,6 +569,7 @@ function handleEvent(e) {
       }
     }
     if (isNewGame) {
+      S.viewPly = null;
       S.feed = [];
       S.finishedHandled = false;
       rebuildFeed(e.state);
@@ -679,6 +732,14 @@ $('shareBtn').onclick = async () => {
     toast(url);
   }
 };
+$('moveBackBtn').onclick = () => navigateTo(viewedPly(S.state) - 1);
+$('moveForwardBtn').onclick = () => navigateTo(viewedPly(S.state) + 1);
+$('moveLiveBtn').onclick = () => navigateTo(moveHistory(S.state).total);
+$('moveSlider').oninput = () => navigateTo(Number($('moveSlider').value));
+$('movelist').onclick = (e) => {
+  const row = e.target.closest('[data-ply]');
+  if (row) navigateTo(Number(row.dataset.ply));
+};
 $('boardSel').onchange = () => { prefs.board = $('boardSel').value; savePrefs(); };
 document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => setTab(t.dataset.tab); });
 
@@ -689,12 +750,13 @@ async function initReplay(id) {
   try {
     const game = await fetchJson(`/api/games/${id}`);
     S.replay = game;
-    S.replayIndex = (game.fens?.length || 1) - 1;
+    S.viewPly = null;
     S.state = {
       status: 'finished',
       fen: game.fen,
       pgn: game.pgn,
       moves: game.moves,
+      fens: game.fens,
       players: game.players,
       result: game.result,
       reason: game.reason,
@@ -712,40 +774,12 @@ async function initReplay(id) {
     renderPlayers(S.state);
     renderMoves(S.state);
     renderVerdict(S.state);
-    renderBoard(S.state);
-    buildReplayBar(game);
+    renderPosition(false);
     $('statusPill').className = 'pill done';
     $('statusPill').textContent = 'replay';
   } catch (err) {
     $('board').innerHTML = `<div class="empty" style="grid-column:1/9;align-self:center">Could not load game ${esc(id)}: ${esc(err.message)}</div>`;
   }
-}
-
-function buildReplayBar(game) {
-  const total = game.moves.length;
-  const bar = document.createElement('div');
-  bar.className = 'controls';
-  bar.style.marginTop = '4px';
-  bar.innerHTML = `
-    <button class="btn ghost" id="rvPrev">◀</button>
-    <input type="range" id="rvRange" min="0" max="${total}" value="${total}" style="flex:1;min-width:120px;accent-color:var(--accent)" aria-label="Move scrubber" />
-    <button class="btn ghost" id="rvNext">▶</button>
-    <span class="hint" id="rvLabel" style="align-self:center;min-width:74px;text-align:center"></span>`;
-  $('controls').appendChild(bar);
-
-  const apply = () => {
-    const i = Number($('rvRange').value);
-    S.replayIndex = i;
-    const fens = game.fens || [];
-    const fen = fens[i] || game.fen;
-    const shown = { ...S.state, fen, inCheck: false, moves: game.moves.slice(0, i), turn: i % 2 === 0 ? 'w' : 'b' };
-    renderBoard(shown, i > 0);
-    $('rvLabel').textContent = `${i} / ${total}`;
-  };
-  $('rvRange').oninput = apply;
-  $('rvPrev').onclick = () => { $('rvRange').value = Math.max(0, Number($('rvRange').value) - 1); apply(); };
-  $('rvNext').onclick = () => { $('rvRange').value = Math.min(total, Number($('rvRange').value) + 1); apply(); };
-  apply();
 }
 
 /* ---------------------------------------------------------------------- boot */

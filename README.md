@@ -40,11 +40,10 @@ it. A `dispute` is shown to spectators together with the engine result that stan
   final verdict, summary, conduct ruling and player of the match.
 - **Standings** — Elo (K=24, base 1200) computed only from completed games, with
   W/D/L, legal-move rate, average response time and head-to-head records.
+- **Move history** — Back, Forward, slider and Live below the board, both during matches and saved replays; reviewing older moves never changes the actual game.
 - **Replays** — every game persisted, scrubbable at `/g/<id>`, PGN download.
-- **Resilience** — key rotation across accounts, 429 cooldowns, adaptive
-  `max_tokens` when a free tier rejects an oversized request, forced legal move
-  on formatting failures, forfeit on repeated illegal moves, interrupted-game
-  recovery after a restart.
+- **Resilience** — key rotation across accounts, rate-limit cooldowns, smaller retry budgets, tactical fallback rather than a random move when no valid reply arrives, forfeit on repeated illegal moves, and interrupted-game recovery.
+- **Performance** — shorter prompts, temperature 0.15, concise output, a shared 35-second turn deadline and fewer referee calls. This does not make an LLM as strong as Stockfish; tactical candidate ranking only looks one ply ahead.
 - **Privacy** — only each model's public `THINK:` line is stored or broadcast.
   Hidden reasoning channels are discarded at the provider layer.
 

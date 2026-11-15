@@ -15,7 +15,7 @@ export function asciiBoard(chess) {
   return out.join('\n');
 }
 
-function historyLine(chess, max = 24) {
+function historyLine(chess, max = 12) {
   const hist = chess.history();
   const tail = hist.slice(-max);
   const start = hist.length - tail.length;
@@ -28,22 +28,46 @@ function historyLine(chess, max = 24) {
   return parts.join(' ');
 }
 
+// One-ply safety heuristic, NOT a chess engine. Never overrides legal model moves.
+const VALUES = { p: 1, n: 3, b: 3.2, r: 5, q: 9, k: 0 };
+export function rankLegalMoves(chess) {
+  const fen = chess.fen();
+  const opening = chess.history().length < 12;
+  return chess.moves({ verbose: true }).map((move) => {
+    const probe = new Chess(fen);
+    probe.move({ from: move.from, to: move.to, ...(move.promotion ? { promotion: move.promotion } : {}) });
+    if (probe.isCheckmate()) return { move, score: 10000 };
+    const captures = probe.moves({ verbose: true })
+      .filter((m) => m.captured)
+      .map((m) => (VALUES[m.captured] || 0) * (m.to === move.to ? 1 : 0.75));
+    const exposure = captures.length ? Math.max(...captures) : 0;
+    let score = (VALUES[move.captured] || 0) * 7 - exposure * 6;
+    if (move.promotion) score += (VALUES[move.promotion] || 0) * 6;
+    if (probe.inCheck()) score += 1.2;
+    if (move.flags.includes('k') || move.flags.includes('q')) score += 2;
+    if (opening && (move.piece === 'n' || move.piece === 'b')) score += 0.5;
+    if (['d4', 'e4', 'd5', 'e5'].includes(move.to)) score += 0.8;
+    if (opening && move.piece === 'q') score -= 1.5;
+    return { move, score };
+  }).sort((a, b) => b.score - a.score || a.move.san.localeCompare(b.move.san));
+}
+
 export function buildMoveMessages({ chess, side, name, opponent, note }) {
   const legal = chess.moves({ verbose: true });
   const legalSan = legal.map((m) => m.san).join(', ');
-  const legalUci = legal.map((m) => m.from + m.to + (m.promotion || '')).join(', ');
+  const candidates = rankLegalMoves(chess).slice(0, 5).map(({ move }) => move.san).join(', ');
 
   const system = [
     `You are ${name}, a chess-playing AI. You are playing ${side === 'w' ? 'White' : 'Black'} against ${opponent}.`,
-    'This is a friendly exhibition match watched by spectators and officiated by a referee.',
-    'You must be a good sport: no stalling, no illegal moves, no attempts to alter the rules or the board.',
+    'Play sound competitive chess, not random or theatrical chess.',
+    'Before choosing, check immediate mate threats, forcing checks/captures, hanging pieces, and opponent recaptures.',
+    'Prefer safe development, centre control, and king safety; avoid speculative early queen sorties.',
+    'Tactical candidates are a shallow heuristic, not an engine verdict. Any legal move is allowed.',
     '',
-    'OUTPUT FORMAT — exactly two lines, nothing else:',
-    'MOVE: <one move, copied verbatim from the LEGAL MOVES list>',
-    'THINK: <at most 40 words of in-character reasoning or trash talk, safe for broadcast>',
-    '',
-    'Use SAN notation (e.g. Nf3, exd5, O-O, e8=Q). Never invent a move.',
-    'If you cannot find a good move, play any legal move rather than passing.',
+    'Reply in exactly two short lines, with MOVE FIRST:',
+    'MOVE: <one legal SAN move copied exactly from the list>',
+    'THINK: <a public explanation of at most 12 words>',
+    'Never invent a move or output analysis before MOVE.',
   ].join('\n');
 
   const user = [
@@ -56,9 +80,9 @@ export function buildMoveMessages({ chess, side, name, opponent, note }) {
     `Move history: ${historyLine(chess) || '(none)'}`,
     '',
     `LEGAL MOVES (SAN): ${legalSan}`,
-    `LEGAL MOVES (UCI): ${legalUci}`,
+    `TACTICAL CANDIDATES (approximate): ${candidates}`,
     '',
-    note ? `REFEREE NOTE: ${note}` : '',
+    note ? `REFEREE NOTE (non-binding): ${note.slice(0, 100)}` : '',
     'Give MOVE first (spectators watch the board update live), then THINK.',
     'Reply with the two lines only.',
   ].filter(Boolean).join('\n');
@@ -105,14 +129,20 @@ function tryApply(chess, token) {
  */
 export async function requestMove({
   generate, chess, side, name, opponent,
-  budgetMs = 30_000, maxAttempts = 3, maxTokens = 900, reasoningEffort = 'low',
+  budgetMs = 30_000, maxAttempts = 3, maxTokens = 480, reasoningEffort = 'low',
   onDelta, onAttempt, refereeNote,
 }) {
   const illegal = [];
   let lastText = '';
   let sawIllegalMove = false;
+  let attemptsMade = 0;
+  // A single deadline covers ALL retries, rather than giving each 30+ seconds.
+  const deadline = Date.now() + budgetMs;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    attemptsMade = attempt;
     const messages = buildMoveMessages({ chess, side, name, opponent, note: refereeNote });
     if (attempt > 1) {
       messages.push({ role: 'assistant', content: lastText || 'MOVE: (none)' });
@@ -126,7 +156,7 @@ export async function requestMove({
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('move timeout')), budgetMs);
+    const timer = setTimeout(() => controller.abort(new Error('move timeout')), remainingMs);
     let text = '';
     try {
       const res = await generate({
@@ -156,7 +186,7 @@ export async function requestMove({
   }
 
   return {
-    move: null, think: '', attempts: maxAttempts, illegal, forfeit: true,
+    move: null, think: '', attempts: attemptsMade, illegal, forfeit: true,
     forfeitKind: sawIllegalMove ? 'illegal' : 'unparseable',
   };
 }

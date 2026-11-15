@@ -298,3 +298,27 @@ table.tbl tr:first-child td:first-child { color: var(--accent); font-weight: 700
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* Move-by-move history works during live matches and on saved game replays. */
+.move-nav {
+  display: grid;
+  justify-items: stretch;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  min-width: 0;
+}
+.move-nav-buttons { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+.move-nav-buttons .btn { min-width: 0; padding: 9px 10px; white-space: nowrap; }
+.move-nav input[type="range"] { width: 100%; min-width: 0; accent-color: var(--accent); touch-action: pan-y; }
+.move-position { display: block; text-align: center; font: 12px/1.4 var(--mono); color: var(--dim); }
+.move-nav .behind { color: var(--warn); }
+.movelist .mv.viewed { outline: 1px solid var(--accent); background: var(--accent-dim); }
+.movelist .mv[data-ply] { cursor: pointer; }
+@media (max-width: 380px) {
+  .move-nav { padding: 7px; }
+  .move-nav-buttons { gap: 5px; }
+  .move-nav-buttons .btn { padding: 8px 6px; font-size: 12px; }
+}
