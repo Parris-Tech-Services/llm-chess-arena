@@ -363,6 +363,11 @@ async function refreshKeys() {
   try {
     const k = await fetchJson('/api/keys');
     const led = $('keyLed');
+    if (k.mode === 'cloudflare-ai') {
+      led.className = 'led';
+      $('keyText').textContent = 'Cloudflare AI · hosted live models';
+      return;
+    }
     if (k.mode === 'mock') {
       led.className = 'led mock';
       $('keyText').textContent = 'mock mode — random legal bots';
