@@ -9,6 +9,7 @@ import { computeStandings } from '../src/rating.mjs';
 
 const FRONTEND = 'https://raw.githubusercontent.com/Parris-Tech-Services/llm-chess-arena/main/public';
 const FALLBACK = { white: 'openai/gpt-oss-120b', black: 'qwen/qwen3.8-27b', referee: 'openai/gpt-oss-20b' };
+const CLOUDFLARE_MODELS = { white: '@cf/openai/gpt-oss-120b', black: '@cf/qwen/qwen3.8-27b', referee: '@cf/openai/gpt-oss-20b' };
 const HEADERS = {
   'cache-control': 'no-store',
   'x-content-type-options': 'nosniff',
@@ -47,7 +48,7 @@ function publicState(s){
   return v;
 }
 function keys(env){return String(env.GROQ_KEYS||'').split(/[\n,]/).map(x=>x.trim()).filter(Boolean);}
-const VALID=/^[\w./:-]{1,100}$/;
+const VALID=/^[@\w./:-]{1,100}$/;
 const playable=id=>!/(whisper|orpheus|prompt-guard|allam|tts|transcrib)/i.test(id);
 const allowed=(m,def)=>typeof m==='string' && VALID.test(m)&&playable(m)?m:def;
 function parseMove(content,chess){
@@ -100,7 +101,11 @@ export class ArenaRoom {
   async modelList(){
     if(this.models && Date.now()-this.modelsAt<10*60*1000)return this.models;
     const all=keys(this.env);
-    if(!all.length)return [{id:'mock',context:0,active:true}];
+    if(!all.length)return [
+      {id:CLOUDFLARE_MODELS.white,context:128000,active:true},
+      {id:CLOUDFLARE_MODELS.black,context:262144,active:true},
+      {id:CLOUDFLARE_MODELS.referee,context:128000,active:true},
+    ];
     try{
       const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{authorization:'Bearer '+all[0]}});
       if(!r.ok)throw Error('Catalogue '+r.status);
@@ -112,7 +117,15 @@ export class ArenaRoom {
   }
   async groq(model,messages,maxTokens=700){
     const all=keys(this.env);
-    if(!all.length)throw Error('No Groq credentials configured on this Cloudflare Worker');
+    if(!all.length){
+      if(!this.env.AI)throw Error('Cloudflare Workers AI binding is unavailable');
+      // Native Workers AI: real models, no device/server process or Groq credentials.
+      const input={messages,max_tokens:Math.min(750,maxTokens),temperature:0.4};
+      if(/gpt-oss|qwen3\.8/i.test(model))input.reasoning_effort='low';
+      const output=await this.env.AI.run(model,input);
+      const result=output?.response ?? output?.choices?.[0]?.message?.content ?? output?.result?.response ?? '';
+      return typeof result==='string'?result:JSON.stringify(result);
+    }
     let err=null,budget=maxTokens;
     for(let n=0;n<Math.min(8,all.length*2);n++){
       const key=all[(this.keyCursor++)%all.length];
@@ -157,7 +170,7 @@ export class ArenaRoom {
   async finish(s,result,reason){
     s.status='finished';s.result=result;s.reason=reason;s.finishedAt=Date.now();s.moveStartedAt=null;
     // Referee cannot override deterministic result.
-    if(result!=='aborted'&&result!=='error'&&keys(this.env).length){
+    if(result!=='aborted'&&result!=='error'&&(keys(this.env).length||this.env.AI)){
       try{
         const prompt='Chess result: '+result+' ('+reason+'). White: '+s.players.w.name+'. Black: '+s.players.b.name+'. PGN: '+s.pgn.slice(-1800)+'. In one sentence explain the result, then write Player of the match: White or Black or none. Do not invent game events.';
         const note=(await this.groq(s.players.referee.model,[{role:'system',content:'You are a concise live chess referee. The rules engine decides the result; you only comment.'},{role:'user',content:prompt}],650)).slice(0,500);
@@ -180,10 +193,7 @@ export class ArenaRoom {
     let selected=null;
     let explanation='',attempts=0,illegal=null,usedForced=false;
     try{
-      if(!keys(this.env).length){
-        const legal=chess.moves(),chosen=legal[Math.floor(Math.random()*legal.length)];
-        selected=chess.move(chosen);explanation='Demo mode: deterministic legal-move selection';attempts=1;
-      }else{
+      {
         for(let n=1;n<=3;n++){
           attempts=n;
           const reply=await this.groq(player.model,movePrompt(s,chess,side,illegal?'Previous answer rejected: '+illegal+'. Try again from the legal list.':''),700);
@@ -235,7 +245,7 @@ export class ArenaRoom {
     this.emit({type:'move',move,state:publicState(s)});this.emitState(s);
     const win=outcome(s,chess);
     if(win){await this.finish(s,win.result,win.reason);return;}
-    if(keys(this.env).length && s.players.referee.model){
+    if((keys(this.env).length||this.env.AI) && s.players.referee.model){
       try{
         const content=await this.groq(s.players.referee.model,[
           {role:'system',content:'You are an entertaining, concise chess commentator, NOT a source of rules. Under 22 words. Never claim a move illegal: the chess rules engine decides legality. No private model reasoning.'},
@@ -278,13 +288,13 @@ export class ArenaRoom {
     }
     const s=await this.getCurrent();
     if(p==='/api/state')return json(publicState(s));
-    if(p==='/health')return json({ok:true,version:'cloudflare-durable-v1',mode:keys(this.env).length?'groq':'mock',
+    if(p==='/health')return json({ok:true,version:'cloudflare-durable-v2',mode:keys(this.env).length?'groq':'cloudflare-ai',
       game:{id:s.id,status:s.status,plies:s.moves.length,result:s.result},keys:{total:keys(this.env).length},backend:'Cloudflare Durable Objects',independentOfPhone:true});
-    if(p==='/api/keys')return json({mode:keys(this.env).length?'groq':'mock',total:keys(this.env).length,available:keys(this.env).length,cooling:0,disabled:0});
+    if(p==='/api/keys')return json({mode:keys(this.env).length?'groq':'cloudflare-ai',total:keys(this.env).length,available:keys(this.env).length,cooling:0,disabled:0});
     if(p==='/api/config'){
       const models=await this.modelList();
-      return json({mode:keys(this.env).length?'groq':'mock',version:'cloudflare-durable-v1',models,
-        defaults:FALLBACK,limits:{maxPlies:220,startPerMinute:4},
+      return json({mode:keys(this.env).length?'groq':'cloudflare-ai',version:'cloudflare-durable-v2',models,
+        defaults:keys(this.env).length?FALLBACK:CLOUDFLARE_MODELS,limits:{maxPlies:220,startPerMinute:4},
         timeControl:{baseMs:300000,incrementMs:1000},pace:700});
     }
     if(p==='/api/standings')return json(computeStandings((await this.ctx.storage.get('results'))||[]));
@@ -310,14 +320,15 @@ export class ArenaRoom {
         try{body=await request.json();}catch{body={};}
       }
       const next=emptyState();
+      const defaults=keys(this.env).length?FALLBACK:CLOUDFLARE_MODELS;
       next.generation=s.generation+1;
       next.id=crypto.randomUUID().slice(0,8);
       next.players={
-        w:{name:allowed(body.white?.name||body.white?.model,FALLBACK.white).split('/').pop(),model:allowed(body.white?.model,FALLBACK.white)},
-        b:{name:allowed(body.black?.name||body.black?.model,FALLBACK.black).split('/').pop(),model:allowed(body.black?.model,FALLBACK.black)},
-        referee:{name:'Referee',model:allowed(body.referee?.model,FALLBACK.referee)},
+        w:{name:allowed(body.white?.name||body.white?.model,defaults.white).split('/').pop(),model:allowed(body.white?.model,defaults.white)},
+        b:{name:allowed(body.black?.name||body.black?.model,defaults.black).split('/').pop(),model:allowed(body.black?.model,defaults.black)},
+        referee:{name:'Referee',model:allowed(body.referee?.model,defaults.referee)},
       };
-      if(!keys(this.env).length){next.players.w.model='mock';next.players.b.model='mock';next.players.referee.model='mock';}
+      // Every configured contender is backed by a real hosted language model.
       const tc=body.timeControl||{};
       next.timeControl={
         baseMs:Number.isFinite(Number(tc.baseMs))?Math.max(0,Math.min(3600000,Number(tc.baseMs))):300000,
@@ -371,7 +382,7 @@ export default {
       }catch(e){return new Response('Frontend temporarily unavailable: '+e.message,{status:503,headers:HEADERS});}
     }
     if(p==='/events'||p==='/health'||p==='/api'||p.startsWith('/api/')){
-      const stub=env.ARENA.getByName('public-arena');
+      const stub=env.ARENA.get(env.ARENA.idFromName('public-arena'));
       return stub.fetch(request);
     }
     return json({error:'not found'},404);
