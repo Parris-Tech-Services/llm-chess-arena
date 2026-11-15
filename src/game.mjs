@@ -332,7 +332,7 @@ export class Arena extends EventEmitter {
 
       this.emit('event', { type: 'move', move: this.moves.at(-1), state: this.snapshot() });
 
-      if (this.config.refereeEnabled && this.moves.length % this.config.refereeEveryPlies === 0) this.scheduleReferee(res, side, Math.ceil(this.chess.history().length / 2));
+      if (this.config.refereeEnabled && this.engineMode !== 'engine' && this.moves.length % this.config.refereeEveryPlies === 0) this.scheduleReferee(res, side, Math.ceil(this.chess.history().length / 2));
 
       if (this.timed && this.clocks[side] <= 0) return this.finish(`${side === 'w' ? 'b' : 'w'}-wins`, 'time out');
 
@@ -373,7 +373,7 @@ export class Arena extends EventEmitter {
   }
 
   explainRejection(info, side) {
-    if (!this.config.refereeEnabled) return;
+    if (!this.config.refereeEnabled || this.engineMode === 'engine') return;
     const key = `${side}:${this.moves.length}:${info.attempt}`;
     if (this._explainLocks.has(key)) return;
     this._explainLocks.add(key);
@@ -425,7 +425,7 @@ export class Arena extends EventEmitter {
     this.emit('event', { type: 'log', text: `Game over: ${result} (${reason})` });
     this.emitState();
 
-    if (this.config.refereeEnabled) {
+    if (this.config.refereeEnabled && this.engineMode !== 'engine') {
       let verdict = { verdict: 'unknown', conduct: 'unknown', note: 'referee did not respond' };
       try {
         await (this.refereePending || Promise.resolve());
