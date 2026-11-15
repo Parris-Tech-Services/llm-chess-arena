@@ -328,6 +328,9 @@ export class Arena extends EventEmitter {
     return this.refereeProvider.generate({
       ...opts,
       model: this.players.referee.model,
+      // Reasoning models spend max_tokens on hidden reasoning before emitting
+      // anything: keep it low and the budget generous or the reply is empty.
+      reasoningEffort: 'low',
       onDelta: (d, full) => this.emit('event', { type: 'stream', kind: 'referee', delta: d, full }),
     });
   }
@@ -390,7 +393,7 @@ export class Arena extends EventEmitter {
       try {
         await (this.refereePending || Promise.resolve());
         verdict = await refereeVerdict({
-          generate: (o) => this.refereeGenerate({ ...o, maxTokens: 500, temperature: 0.3 }),
+          generate: (o) => this.refereeGenerate({ ...o, maxTokens: 900, temperature: 0.3 }),
           result,
           reason,
           players: this.publicPlayers,
