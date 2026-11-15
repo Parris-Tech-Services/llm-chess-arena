@@ -33,5 +33,12 @@ jobs:
           git add worker/dist/arena.js
           if ! git diff --staged --quiet; then
             git commit -m "build(worker): bundle autonomous chess service"
-            git push
+            # Other agents may update main while the bundle is compiling.
+            # Rebase this generated-file commit and retry without force pushes.
+            for attempt in 1 2 3 4; do
+              git fetch origin main
+              git rebase origin/main
+              if git push origin HEAD:main; then exit 0; fi
+            done
+            exit 1
           fi
