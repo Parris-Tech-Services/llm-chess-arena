@@ -83,6 +83,7 @@ export class Arena extends EventEmitter {
       turn: this.chess.turn(),
       inCheck: this.chess.inCheck(),
       moves: this.moves,
+      fens: this.fens,
       players: this.publicPlayers,
       clocks: this.clocks,
       result: this.result,
