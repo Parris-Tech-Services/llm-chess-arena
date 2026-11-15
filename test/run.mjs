@@ -264,7 +264,7 @@ test('oversized max_tokens is shrunk and retried, not fatal', async () => {
 });
 
 test('tactical shortlist prefers a forced mate-in-one', () => {
-  const chess = new Chess('r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4');
+  const chess = new Chess('r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4');
   const ranked = rankLegalMoves(chess);
   assert.equal(ranked[0].move.san, 'Qxf7#');
   assert.equal(ranked.length, chess.moves().length);
