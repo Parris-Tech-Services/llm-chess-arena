@@ -1,0 +1,26 @@
+# Free, container-backed preview hosting for LLM Chess Arena.
+# Render free services sleep when idle, and local /data is ephemeral.
+# For durable game history use a paid plan with persistent disk or external store.
+services:
+  - type: web
+    name: llm-chess-arena
+    runtime: docker
+    plan: free
+    region: singapore
+    repo: https://github.com/Parris-Tech-Services/llm-chess-arena
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "8787"
+      - key: DATA_DIR
+        value: /data
+      - key: STOCKFISH_PATH
+        value: /usr/games/stockfish
