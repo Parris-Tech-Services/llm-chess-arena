@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Chess } from 'chess.js';
 import { Arena } from '../src/game.mjs';
+import { rankLegalMoves, buildMoveMessages, requestMove } from '../src/bots.mjs';
 import { KeyPool } from '../src/keys.mjs';
 import { createGroqProvider } from '../src/provider.mjs';
 import { Store } from '../src/storage.mjs';
@@ -50,6 +51,7 @@ test('full game: every move legal, PGN replays exactly', async () => {
   replay.loadPgn(snap.pgn);
   assert.equal(replay.history().length, snap.moves.length, 'PGN has every move');
   assert.equal(arena.fens.length, snap.moves.length + 1, 'FEN history matches plies');
+  assert.deepEqual(snap.fens, arena.fens, 'snapshot includes the live move history');
 });
 
 test('illegal moves: three strikes then forfeit', async () => {
@@ -259,6 +261,24 @@ test('oversized max_tokens is shrunk and retried, not fatal', async () => {
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('tactical shortlist prefers a forced mate-in-one', () => {
+  const chess = new Chess('r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4');
+  const ranked = rankLegalMoves(chess);
+  assert.equal(ranked[0].move.san, 'Qxf7#');
+  assert.equal(ranked.length, chess.moves().length);
+  assert.match(buildMoveMessages({ chess, side: 'w', name: 'W', opponent: 'B' })[1].content, /TACTICAL CANDIDATES/);
+});
+
+test('per-turn timeout is shared across retries', async () => {
+  const slow = async ({ signal }) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+  });
+  const started = Date.now();
+  const res = await requestMove({ generate: slow, chess: new Chess(), side: 'w', name: 'W', opponent: 'B', budgetMs: 80, maxAttempts: 3 });
+  assert.ok(Date.now() - started < 250, 'only one total timeout instead of three');
+  assert.equal(res.forfeit, true);
 });
 
 /* -------------------------------------------------------------------- runner */
