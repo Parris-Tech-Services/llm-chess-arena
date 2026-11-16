@@ -79,6 +79,7 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   assert.match(js, /searchParams.get\('analysis'\) === 'on'/);
   assert.match(js, /searchParams.get\('ply'\)/);
   assert.match(js, /shared.searchParams.set\('ply'/);
+  assert.match(js, /REPLAYING/);
 });
 
 console.log((5 - failures) + '/5 Cloudflare adapter tests passed');
