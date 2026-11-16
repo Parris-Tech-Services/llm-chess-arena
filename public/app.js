@@ -215,6 +215,7 @@ function renderPosition(animate = false) {
   const moveLabel = last ? `${Math.floor((index - 1) / 2) + 1}${last.side === 'w' ? '.' : '…'} ${last.san}` : 'Starting position';
   $('movePosition').textContent = `${index} / ${total} · ${moveLabel}${index < total ? (S.state.status === 'playing' ? ' · LIVE CONTINUES' : ' · REPLAYING') : ' · Latest'}`;
   $('movePosition').classList.toggle('behind', index < total);
+  renderDecision();
   updateEnginePanel();
 }
 
@@ -380,6 +381,7 @@ function renderAll(animate = false) {
   renderMoves(state);
   updateControls(state);
   renderVerdict(state);
+  renderDecision();
 }
 
 /* --------------------------------------------------------------------- tabs */
@@ -419,7 +421,7 @@ async function loadConfig() {
     const available = !!S.config.stockfish?.available;
     for (const option of $('engineMode').options) option.disabled = option.value !== 'pure' && !available;
     $('engineMode').value = 'pure';
-    if (!available) $('engineHelp').textContent = 'Stockfish is not installed on this host. Pure LLM mode remains available.';
+    if (!available) $('engineHelp').textContent = 'Cloud matches use independent LLMs. Optional Stockfish analysis and candidate lines are available beneath the board.';
     refreshKeys();
   } catch (err) {
     showBanner(`Could not load model catalogue: ${err.message}`);
@@ -805,145 +807,301 @@ async function initReplay(id) {
 }
 
 
-/* ---------------------------------------------------------- local Stockfish */
-// Browser-only analysis: NEVER feeds moves back into the autonomous AI match.
-const ENGINE = {
-  enabled: false, ready: false, searching: false, worker: null,
-  currentFen: null, pendingFen: null, turn: 'w',
-  depth: 0, timer: null,
-};
 
+/* ------------------------------------------------------ Live decision desk */
+// The live model's internal chain-of-thought is unavailable. 'considered' is
+// only what it deliberately reports in its public answer after a decision.
+const OPENINGS = {
+  entries: null, loading: false, error: null, lastKey: null, lastLabel: null,
+};
+function canonicalSan(value) {
+  return String(value || '').replace(/[+#?!]/g, '');
+}
+async function loadOpeningNames() {
+  if (OPENINGS.loading || OPENINGS.entries) return;
+  OPENINGS.loading = true;
+  try {
+    const letters = ['a','b','c','d','e'];
+    const res = await Promise.all(letters.map((s) => fetch('/data/openings/' + s + '.tsv')));
+    if (res.some((r) => !r.ok)) throw Error('Opening reference temporarily unavailable');
+    const files = await Promise.all(res.map((r) => r.text()));
+    const entries = [];
+    for (const file of files) {
+      const rows = file.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+      const header = rows.shift().split('\t');
+      const eco = header.indexOf('eco'), name = header.indexOf('name'), pgn = header.indexOf('pgn');
+      if (eco < 0 || name < 0 || pgn < 0) throw Error('Unexpected opening database format');
+      for (const row of rows) {
+        const cols = row.split('\t');
+        const moves = (cols[pgn] || '').replace(/\d+\.(?:\.\.)?/g, ' ')
+          .trim().split(/\s+/).filter(Boolean).map(canonicalSan);
+        if (moves.length && cols[name]) entries.push({eco:cols[eco],name:cols[name],moves});
+      }
+    }
+    OPENINGS.entries = entries;
+    OPENINGS.lastKey = null;
+    renderDecision();
+  } catch (error) {
+    OPENINGS.error = error.message;
+    $('openingInfo').textContent = error.message + ' · Position names remain optional.';
+  } finally {
+    OPENINGS.loading = false;
+  }
+}
+function estimatePhase(fen, ply) {
+  if (ply < 20) return 'Opening';
+  const pieces = String(fen || '').split(' ')[0].replace(/[0-9/]/g, '');
+  const minorMajor = (pieces.match(/[qrbnQRBN]/g) || []).length;
+  if (minorMajor <= 5 && ply >= 34) return 'Endgame (likely)';
+  return 'Middlegame (likely)';
+}
+function openingAt(state, ply) {
+  const selected = (state.moves || []).slice(0, ply).map((m) => canonicalSan(m.san));
+  const cacheKey = (state.id || 'new') + ':' + selected.join(' ');
+  if (cacheKey === OPENINGS.lastKey) return OPENINGS.lastLabel;
+  let match = null;
+  for (const item of OPENINGS.entries || []) {
+    if (item.moves.length > selected.length || match && item.moves.length < match.moves.length) continue;
+    if (item.moves.every((m,i) => selected[i] === m)) match = item;
+  }
+  OPENINGS.lastKey = cacheKey;
+  OPENINGS.lastLabel = match;
+  return match;
+}
+function renderDecision() {
+  const state = S.state;
+  if (!state) return;
+  const active = state.status === 'playing';
+  const side = state.turn || 'w';
+  const player = state.players?.[side];
+  const elapsed = active && Number.isFinite(state.moveStartedAt) && state.moveStartedAt > 0
+    ? Math.max(0, (Date.now() - state.moveStartedAt) / 1000) : 0;
+  const historical = viewedPly(state) < (state.moves || []).length;
+  $('decisionStatus').textContent = active ? '● LIVE' : state.status === 'finished' ? '● FINISHED' : '● ' + String(state.status).toUpperCase();
+  $('decisionModel').textContent = active
+    ? (player?.name || (side === 'w' ? 'White' : 'Black')) + ' · deciding as ' + (side === 'w' ? 'White' : 'Black')
+    : 'No active model decision';
+  $('decisionTimer').textContent = active ? elapsed.toFixed(1) + 's' : '—';
+  $('decisionNote').textContent = active
+    ? 'Waiting for a public MOVE / CANDIDATES / THINK response. Private model reasoning cannot be viewed.'
+    : 'Public explanations are recorded with each move. This is not private model reasoning.';
+  const ply = viewedPly(state);
+  const fens = moveHistory(state).fens;
+  const fen = fens[ply] || state.fen;
+  $('gamePhase').textContent = estimatePhase(fen, ply);
+  const opening = OPENINGS.entries ? openingAt(state,ply) : null;
+  $('openingName').textContent = opening
+    ? opening.name : OPENINGS.error ? 'Opening name unavailable'
+    : OPENINGS.entries ? (ply ? 'Unclassified continuation' : 'Starting position') : 'Loading opening names…';
+  $('openingInfo').textContent = opening
+    ? opening.eco + ' · Lichess opening database (last known sequence)'
+    : OPENINGS.error ? OPENINGS.error
+    : 'ECO based on a named move sequence; unusual transpositions may differ.';
+  const last = state.moves?.[ply - 1];
+  if (!last) {
+    $('modelCandidates').textContent = 'No model move selected yet.';
+    $('modelExplain').textContent = 'Independent engine alternatives appear below once analysis is enabled.';
+  } else if (last.considered?.length) {
+    $('modelCandidates').textContent = last.considered.join(' · ');
+    $('modelExplain').textContent =
+      (historical ? 'Move ' + ply + ': ' : 'Latest move: ') +
+      (last.side === 'w' ? 'White' : 'Black') + ' played ' + last.san +
+      '. Public explanation: ' + (last.think || 'Not supplied.');
+  } else {
+    $('modelCandidates').textContent = 'Not recorded for move ' + ply + '.';
+    $('modelExplain').textContent =
+      'Played ' + last.san + '. ' + (last.think || 'No public explanation was supplied.') +
+      ' · Only new matches can contain model-reported alternatives.';
+  }
+}
+setInterval(renderDecision, 500);
+loadOpeningNames();
+
+/* ----------------------------------------------------------- Chess analysis */
+// A separate UCI Web Worker evaluates a position; its engine output is not
+// an LLM's private thoughts. MultiPV 3 offers three independent candidate lines.
+const ENGINE = {
+  enabled:false, ready:false, searching:false, worker:null, currentFen:null,
+  targetFen:null, queue:[], turn:'w', depth:0, timer:null,
+  lines:new Map(), evaluations:new Map(),
+};
 function currentViewFen() {
   if (!S.state) return null;
-  const { fens, available } = moveHistory(S.state);
+  const {fens,available} = moveHistory(S.state);
   return available ? fens[viewedPly(S.state)] : S.state.fen;
 }
-
+function engineLineText(uci) {
+  return (uci || '').trim().split(/\s+/).slice(0, 5).map((m) =>
+    /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(m) ? m.slice(0,2) + '→' + m.slice(2) : ''
+  ).filter(Boolean).join(' ');
+}
+function displayEngineScore(obj) {
+  if (!obj) return '—';
+  if (obj.mate !== null) return (obj.mate >= 0 ? 'M+' : 'M') + Math.abs(obj.mate);
+  const n = (obj.cp || 0) / 100;
+  return (n > 0 ? '+' : '') + n.toFixed(2);
+}
+function renderEngineCandidates() {
+  const rows = Array.from(ENGINE.lines.values()).sort((a,b)=>a.rank-b.rank).filter((r)=>r.pv);
+  if (!ENGINE.enabled || !rows.length) { $('engineCandidates').hidden = true; return; }
+  $('engineCandidates').hidden = false;
+  $('engineCandidates').innerHTML = rows.map((r) =>
+    '<div class="engine-line"><span class="engine-rank">#' + r.rank + '</span>' +
+    '<span class="pv">' + esc(engineLineText(r.pv)) +
+    ' <span class="engine-depth">depth ' + r.depth + '</span></span>' +
+    '<strong class="engine-score">' + esc(displayEngineScore(r)) + '</strong></div>'
+  ).join('');
+  const first = rows[0];
+  if (first) {
+    $('engineEval').textContent = displayEngineScore(first);
+    $('engineBest').textContent = 'Best: ' + engineLineText(first.pv).split(' ')[0];
+    $('engineDepth').textContent = 'Depth ' + first.depth + ' · White perspective · ' + rows.length + ' lines';
+  }
+}
+function renderMoveQuality() {
+  const box = $('moveQuality');
+  box.hidden = true;
+  box.className = 'move-quality hint';
+  if (!ENGINE.enabled || !S.state) return;
+  const index = viewedPly(S.state);
+  const fens = moveHistory(S.state).fens;
+  if (!index || !fens[index-1] || !fens[index]) return;
+  const before = ENGINE.evaluations.get(fens[index-1]);
+  const after = ENGINE.evaluations.get(fens[index]);
+  if (!before || !after || before.depth < 9 || after.depth < 9
+    || before.mate !== null || after.mate !== null) return;
+  const side = S.state.moves[index - 1]?.side === 'w' ? 1 : -1;
+  const loss = Math.max(0, Math.round((before.cp - after.cp) * side));
+  const label = loss >= 250 ? 'Possible blunder' : loss >= 120 ? 'Possible mistake' :
+    loss >= 60 ? 'Possible inaccuracy' : 'Reasonable move';
+  box.classList.toggle('warning', loss >= 60 && loss < 250);
+  box.classList.toggle('blunder', loss >= 250);
+  box.textContent = label + ': ' + S.state.moves[index - 1].san +
+    ' · ~' + (loss / 100).toFixed(2) + ' pawns vs engine baseline' +
+    (before.pv ? ' · previous top line ' + engineLineText(before.pv).split(' ')[0] : '') +
+    '. Approximate Stockfish Lite comparison; not a certified accuracy score.';
+  box.hidden = false;
+}
 function updateEnginePanel() {
   if (S.state) {
     const timed = S.state.moves.filter((m) => Number.isFinite(m.ms));
     if (timed.length) {
-      const average = Math.round(timed.reduce((sum, m) => sum + m.ms, 0) / timed.length);
-      const last = timed[timed.length - 1];
-      const source = last.source && last.source !== 'llm' ? ' · ' + last.source.replaceAll('-', ' ') : '';
-      $('engineSpeed').textContent = 'Avg move: ' + (average / 1000).toFixed(1)
-        + 's · Last: ' + (last.ms / 1000).toFixed(1) + 's' + source;
+      const avg = timed.reduce((sum, m)=>sum+m.ms,0)/timed.length;
+      const last = timed.at(-1);
+      $('engineSpeed').textContent = 'Avg move: ' + (avg/1000).toFixed(1) +
+        's · Last: ' + (last.ms/1000).toFixed(1) + 's';
     }
   }
-  if (!ENGINE.enabled || !ENGINE.ready) return;
+  if (!ENGINE.enabled || !ENGINE.ready || !S.state) return;
   const fen = currentViewFen();
-  if (!fen || fen === ENGINE.currentFen || fen === ENGINE.pendingFen) return;
-  ENGINE.pendingFen = fen;
+  if (!fen || ENGINE.targetFen === fen) {renderMoveQuality();return;}
+  ENGINE.targetFen = fen;
+  const index = viewedPly(S.state), fens = moveHistory(S.state).fens;
+  const previous = index > 0 ? fens[index-1] : null;
+  ENGINE.queue = [];
+  if (previous && !ENGINE.evaluations.has(previous)) ENGINE.queue.push(previous);
+  ENGINE.queue.push(fen);
   if (ENGINE.searching) ENGINE.worker.postMessage('stop');
   else engineAnalyzeNext();
 }
-
 function engineAnalyzeNext() {
-  if (!ENGINE.enabled || !ENGINE.ready || ENGINE.searching || !ENGINE.pendingFen) return;
-  ENGINE.currentFen = ENGINE.pendingFen;
-  ENGINE.pendingFen = null;
+  if (!ENGINE.enabled || !ENGINE.ready || ENGINE.searching || !ENGINE.queue.length) return;
+  ENGINE.currentFen = ENGINE.queue.shift();
   ENGINE.turn = ENGINE.currentFen.split(' ')[1] || 'w';
-  ENGINE.searching = true;
-  ENGINE.depth = 0;
+  ENGINE.searching = true; ENGINE.depth = 0; ENGINE.lines = new Map();
   $('engineEval').textContent = '…';
-  $('engineBest').textContent = 'Searching move ' + viewedPly(S.state) + '…';
-  $('engineDepth').textContent = 'Stockfish · calculating locally';
+  $('engineBest').textContent = ENGINE.currentFen === ENGINE.targetFen
+    ? 'Comparing three moves…' : 'Checking previous move…';
+  $('engineDepth').textContent = 'Stockfish · analysing position';
+  $('engineCandidates').hidden = true;
   ENGINE.worker.postMessage('position fen ' + ENGINE.currentFen);
-  ENGINE.worker.postMessage('go movetime 500');
+  ENGINE.worker.postMessage('go movetime 1100');
 }
-
 function onEngineLine(line) {
   if (line === 'uciok') {
-    ENGINE.worker.postMessage('setoption name MultiPV value 1');
+    ENGINE.worker.postMessage('setoption name MultiPV value 3');
     ENGINE.worker.postMessage('isready');
     return;
   }
   if (line === 'readyok') {
     ENGINE.ready = true;
     clearTimeout(ENGINE.timer);
-    $('engineMessage').textContent = 'Stockfish runs on this device, independent of your live AI match.';
+    $('engineMessage').textContent = 'Three ranked lines from local Stockfish; models’ public candidates appear above after their move.';
     $('engineDetails').hidden = false;
-    ENGINE.pendingFen = currentViewFen();
-    engineAnalyzeNext();
+    ENGINE.targetFen = null;
+    updateEnginePanel();
     return;
   }
-  if (line.startsWith('info ') && ENGINE.searching && !ENGINE.pendingFen) {
+  if (line.startsWith('info ') && ENGINE.searching) {
     const depth = Number(/\bdepth (\d+)/.exec(line)?.[1] || 0);
-    if (depth < ENGINE.depth) return;
+    const rank = Number(/\bmultipv (\d+)/.exec(line)?.[1] || 1);
     const score = /\bscore (cp|mate) (-?\d+)/.exec(line);
-    const pv = /\bpv ([a-h][1-8][a-h][1-8][qrbn]?)/.exec(line);
-    if (!score) return;
-    ENGINE.depth = depth;
+    const pv = /\bpv ([a-h][1-8][a-h][1-8][qrbn]?(?:\s+[a-h][1-8][a-h][1-8][qrbn]?)*)/.exec(line);
+    if (!score || !pv || rank > 3 || depth < 1) return;
+    const old = ENGINE.lines.get(rank);
+    if (old && depth < old.depth) return;
     const raw = Number(score[2]) * (ENGINE.turn === 'b' ? -1 : 1);
-    $('engineEval').textContent = score[1] === 'mate'
-      ? (raw >= 0 ? 'M+' : 'M') + Math.abs(raw)
-      : (raw >= 0 ? '+' : '') + (raw / 100).toFixed(2);
-    if (pv) $('engineBest').textContent = 'Best: ' + pv[1].slice(0, 2) + ' → ' + pv[1].slice(2, 4);
-    $('engineDepth').textContent = 'Depth ' + depth + ' · White perspective';
+    ENGINE.lines.set(rank,{
+      rank,depth,pv:pv[1],
+      cp:score[1] === 'cp' ? raw : null,
+      mate:score[1] === 'mate' ? raw : null,
+    });
+    if (ENGINE.currentFen === ENGINE.targetFen) renderEngineCandidates();
   }
   if (line.startsWith('bestmove ')) {
     ENGINE.searching = false;
-    if (ENGINE.pendingFen) {
+    const first = ENGINE.lines.get(1);
+    if (first && first.depth >= 7) {
+      ENGINE.evaluations.set(ENGINE.currentFen,first);
+      if (ENGINE.evaluations.size > 150) ENGINE.evaluations.delete(ENGINE.evaluations.keys().next().value);
+    }
+    if (ENGINE.queue.length) {
       engineAnalyzeNext();
-    } else if (ENGINE.enabled) {
-      const best = /^bestmove ([a-h][1-8][a-h][1-8][qrbn]?)/.exec(line)?.[1];
-      if (best) $('engineBest').textContent = 'Best: ' + best.slice(0, 2) + ' → ' + best.slice(2, 4);
+    } else {
+      if (ENGINE.currentFen === ENGINE.targetFen) renderEngineCandidates();
+      renderMoveQuality();
     }
   }
 }
-
 function stopStockfish() {
-  ENGINE.enabled = false;
-  ENGINE.ready = false;
-  ENGINE.searching = false;
-  ENGINE.pendingFen = null;
-  ENGINE.currentFen = null;
-  clearTimeout(ENGINE.timer);
-  ENGINE.worker?.terminate();
-  ENGINE.worker = null;
-  $('engineToggle').textContent = 'Enable analysis';
-  $('engineToggle').setAttribute('aria-pressed', 'false');
-  $('engineDetails').hidden = true;
-  $('engineMessage').textContent = 'Analysis off. You can enable it for any live or saved position.';
+  ENGINE.enabled=false;ENGINE.ready=false;ENGINE.searching=false;
+  ENGINE.currentFen=null;ENGINE.targetFen=null;ENGINE.queue=[];ENGINE.lines=new Map();
+  clearTimeout(ENGINE.timer); ENGINE.worker?.terminate(); ENGINE.worker=null;
+  $('engineToggle').textContent='Enable analysis';
+  $('engineToggle').setAttribute('aria-pressed','false');
+  $('engineDetails').hidden=true;$('engineCandidates').hidden=true;$('moveQuality').hidden=true;
+  $('engineMessage').textContent='Analysis off. Enable it to compare three candidate moves and review mistakes.';
 }
-
 async function toggleStockfish() {
-  if (ENGINE.enabled) { stopStockfish(); return; }
-  ENGINE.enabled = true;
-  $('engineToggle').textContent = 'Disable analysis';
-  $('engineToggle').setAttribute('aria-pressed', 'true');
-  $('engineMessage').textContent = 'Loading Stockfish Lite… (around 2 MB, once cached)';
+  if (ENGINE.enabled) {stopStockfish();return;}
+  ENGINE.enabled=true;
+  $('engineToggle').textContent='Disable analysis';
+  $('engineToggle').setAttribute('aria-pressed','true');
+  $('engineMessage').textContent='Loading local Stockfish Lite…';
   try {
-    const check = await fetch('/engine/manifest', { cache: 'no-store' });
-    if (!check.ok) throw new Error('This host does not provide browser Stockfish');
-    const manifest = await check.json();
-    if (!manifest.available) throw new Error('Browser engine unavailable on this host');
+    const check=await fetch('/engine/manifest',{cache:'no-store'});
+    if (!check.ok || !(await check.json()).available) throw Error('The engine is unavailable here');
     if (!ENGINE.enabled) return;
-    ENGINE.worker = new Worker('/engine/stockfish-19-lite-single.js');
-    ENGINE.worker.onmessage = (event) => {
-      const lines = String(event.data || '').split(/\r?\n/);
-      for (const line of lines) if (line) onEngineLine(line.trim());
+    ENGINE.worker=new Worker('/engine/stockfish-19-lite-single.js');
+    ENGINE.worker.onmessage=(event)=>{
+      for (const part of String(event.data||'').split(/\r?\n/)) if (part) onEngineLine(part.trim());
     };
-    ENGINE.worker.onerror = (event) => {
-      const message = event.message || 'Engine file could not be loaded';
-      stopStockfish();
-      $('engineMessage').textContent = 'Stockfish unavailable: ' + message;
+    ENGINE.worker.onerror=(event)=>{
+      const message=event.message||'Engine failed to load';
+      stopStockfish();$('engineMessage').textContent='Stockfish error: '+message;
     };
-    ENGINE.timer = setTimeout(() => {
+    ENGINE.timer=setTimeout(()=>{
       if (ENGINE.enabled && !ENGINE.ready) {
-        stopStockfish();
-        $('engineMessage').textContent = 'Stockfish did not start. Check your connection, then retry.';
+        stopStockfish();$('engineMessage').textContent='Stockfish did not start. Retry analysis.';
       }
-    }, 20000);
+    },20000);
     ENGINE.worker.postMessage('uci');
-  } catch (error) {
-    stopStockfish();
-    $('engineMessage').textContent = 'Stockfish unavailable: ' + error.message;
+  } catch(e) {
+    stopStockfish();$('engineMessage').textContent='Stockfish unavailable: '+e.message;
   }
 }
-
-$('engineToggle').onclick = toggleStockfish;
-window.addEventListener('pagehide', () => ENGINE.worker?.terminate());
+$('engineToggle').onclick=toggleStockfish;
+window.addEventListener('pagehide',()=>ENGINE.worker?.terminate());
 
 /* ---------------------------------------------------------------------- boot */
 savePrefs();
