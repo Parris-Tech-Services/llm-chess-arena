@@ -70,6 +70,7 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const html = await fs.readFile(path.join(root, 'public/index.html'), 'utf8');
   const js = await fs.readFile(path.join(root, 'public/app.js'), 'utf8');
+  const css = await fs.readFile(path.join(root, 'public/style.css'), 'utf8');
   for (const id of ['moveBackBtn','moveForwardBtn','moveLiveBtn','moveSlider','engineToggle','engineEval','engineBest','engineSpeed']) {
     assert.ok(html.includes('id="' + id + '"'), id);
   }
@@ -80,6 +81,7 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   assert.match(js, /searchParams.get\('ply'\)/);
   assert.match(js, /shared.searchParams.set\('ply'/);
   assert.match(js, /REPLAYING/);
+  assert.match(css, /\.engine-details\[hidden\]/);
 });
 
 console.log((5 - failures) + '/5 Cloudflare adapter tests passed');
