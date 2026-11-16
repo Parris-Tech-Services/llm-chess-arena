@@ -58,8 +58,8 @@ await test('engine static proxy has correct JS and WASM types', async () => {
       await res.arrayBuffer();
     }
     assert.deepEqual(calls, [
-      'https://cdn.jsdelivr.net/npm/stockfish@19.0.1/bin/stockfish-19-lite-single.js',
-      'https://cdn.jsdelivr.net/npm/stockfish@19.0.1/bin/stockfish-19-lite-single.wasm',
+      'https://unpkg.com/stockfish@19.0.1/bin/stockfish-19-lite-single.js',
+      'https://unpkg.com/stockfish@19.0.1/bin/stockfish-19-lite-single.wasm',
     ]);
   } finally {
     globalThis.fetch = actualFetch;
