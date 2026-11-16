@@ -92,6 +92,42 @@ await test('Cloudflare AI prompt requests public candidates, not private reasoni
   assert.match(script,/legalChoices=s\.moves\(\)/);
 });
 
+await test('autonomous AI turn stores public candidates and rejects illegal suggestions', async () => {
+  const data = new Map();
+  const ctx = {
+    storage: {
+      async get(key) { return data.get(key); },
+      async put(key, value) { data.set(key, structuredClone(value)); },
+      async setAlarm() { /* deterministic in-process test; never schedule real work */ },
+    },
+  };
+  const replies = [];
+  const env = {AI:{
+    async run(model, input) {
+      replies.push({model,input});
+      const prompt = input?.messages?.[0]?.content || '';
+      if (prompt.includes('competing in live chess')) {
+        return {response:'MOVE: e4\nCANDIDATES: e4, d4, e5, Nf3\nTHINK: I chose a central pawn advance and considered developing a knight.'};
+      }
+      return {response:'White develops a central pawn.'};
+    },
+  }};
+  const room = new ArenaRoom(ctx, env);
+  const started = await room.fetch(new Request('https://example.invalid/api/start', {
+    method:'POST',headers:{'content-type':'application/json'},body:'{}',
+  }));
+  assert.equal(started.status,202);
+  await room.alarm();
+  const state = await (await room.fetch(request('/api/state'))).json();
+  assert.equal(state.moves.length,1, 'one real chess ply was committed');
+  assert.equal(state.moves[0].san,'e4');
+  assert.deepEqual(state.moves[0].considered,['e4','d4','Nf3'], 'e5 was illegal for White and filtered');
+  assert.match(state.moves[0].think,/central pawn advance/);
+  assert.equal(state.moves[0].forced,false);
+  assert.equal(state.fens.length,2);
+  assert.ok(replies.some((r)=>r.input.messages[0].content.includes('CANDIDATES:')));
+});
+
 await test('frontend includes play-by-play navigation and engine opt-in', async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const html = await fs.readFile(path.join(root, 'public/index.html'), 'utf8');
@@ -114,5 +150,5 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   assert.match(css, /\.engine-details\[hidden\]/);
 });
 
-console.log((7 - failures) + '/7 Cloudflare adapter tests passed');
+console.log((8 - failures) + '/8 Cloudflare adapter tests passed');
 process.exitCode = failures ? 1 : 0;
