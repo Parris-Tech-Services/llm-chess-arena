@@ -33,6 +33,7 @@ const S = {
   streams: { w: '', b: '' },
   replay: null,
   viewPly: null, // null follows the newest move; a number freezes the board at that ply
+  initialPlyApplied: false,
   connected: false,
   finishedHandled: false,
 };
@@ -179,6 +180,14 @@ function navigateTo(ply) {
 
 function renderPosition(animate = false) {
   if (!S.state) return;
+  if (!S.initialPlyApplied) {
+    S.initialPlyApplied = true;
+    const requested = new URL(location.href).searchParams.get('ply');
+    if (requested !== null && /^\d+$/.test(requested)) {
+      const target = Math.min(moveHistory(S.state).total, Number(requested));
+      S.viewPly = target === moveHistory(S.state).total ? null : target;
+    }
+  }
   const { fens, total, available } = moveHistory(S.state);
   const index = viewedPly(S.state);
   const moves = S.state.moves || [];
@@ -733,7 +742,10 @@ $('fullBtn').onclick = () => {
 };
 $('shareBtn').onclick = async () => {
   const id = S.state?.id;
-  const url = id ? `${location.origin}/g/${id}` : location.href;
+  const shared = new URL(id ? `/g/${id}` : location.pathname, location.origin);
+  if (S.viewPly !== null) shared.searchParams.set('ply', String(viewedPly(S.state)));
+  if (ENGINE.enabled) shared.searchParams.set('analysis', 'on');
+  const url = shared.toString();
   try {
     await navigator.clipboard.writeText(url);
     toast('Share link copied');
