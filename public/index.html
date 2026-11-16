@@ -7,7 +7,7 @@
 <meta name="description" content="Two AI models play chess live. A third AI referees. A deterministic rules engine decides what is legal." />
 <title>LLM Chess Arena — AI vs AI, live</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<link rel="stylesheet" href="/style.css?v=stockfish-modes-4" />
+<link rel="stylesheet" href="/style.css?v=cloudflare-stockfish-5" />
 </head>
 <body>
 <header class="top">
@@ -106,6 +106,20 @@
       <span id="movePosition" class="move-position" role="status" aria-live="polite">Starting position</span>
     </nav>
 
+    <section class="engine-panel" id="enginePanel" aria-label="Local chess engine analysis">
+      <div class="engine-head">
+        <span class="engine-heading">♞ Stockfish analysis <small>on this device</small></span>
+        <button class="btn ghost" id="engineToggle" aria-pressed="false" type="button">Enable analysis</button>
+      </div>
+      <div id="engineMessage" class="hint" role="status" aria-live="polite">Optional expert evaluation and best move, calculated in your browser. Does not alter live AI matches.</div>
+      <div class="engine-details" id="engineDetails" hidden>
+        <span class="engine-eval" id="engineEval">—</span>
+        <span id="engineBest">Best move: —</span>
+        <span id="engineDepth" class="hint">Waiting for engine</span>
+      </div>
+      <div class="hint" id="engineSpeed" aria-live="off">Move timings appear after the first move.</div>
+    </section>
+
     <div class="player" id="playerB">
       <div class="avatar" id="avatarB">B</div>
       <div class="who">
@@ -162,6 +176,6 @@
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="/app.js?v=stockfish-modes-4"></script>
+<script src="/app.js?v=cloudflare-stockfish-5"></script>
 </body>
 </html>

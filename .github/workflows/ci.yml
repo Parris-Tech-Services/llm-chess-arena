@@ -18,6 +18,8 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y stockfish
       - run: test -x /usr/games/stockfish
       - run: node --check public/app.js
+      - run: node --check cloudflare/worker.mjs
+      - run: npm run test:cloudflare
       - run: node --check src/bots.mjs
       - run: node --check src/game.mjs
       - run: node --check src/stockfish.mjs
