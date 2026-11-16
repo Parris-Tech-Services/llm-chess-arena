@@ -66,15 +66,45 @@ await test('engine static proxy has correct JS and WASM types', async () => {
   }
 });
 
+await test('opening-data proxy is fixed-path, safe, and returns ECO TSV', async () => {
+  const actualFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (uri) => {
+    calls.push(String(uri));
+    return new Response('eco\tname\tpgn\nC50\tItalian Game\t1. e4 e5 2. Nf3 Nc6 3. Bc4\n', {status:200});
+  };
+  try {
+    const res = await worker.fetch(request('/data/openings/c.tsv'), {}, {});
+    assert.equal(res.status,200);
+    assert.match(res.headers.get('content-type'), /tab-separated-values/);
+    assert.match(await res.text(), /Italian Game/);
+    assert.equal((await worker.fetch(request('/data/openings/z.tsv'), {}, {})).status,404);
+    assert.deepEqual(calls, ['https://raw.githubusercontent.com/lichess-org/chess-openings/master/c.tsv']);
+  } finally { globalThis.fetch = actualFetch; }
+});
+
+await test('Cloudflare AI prompt requests public candidates, not private reasoning', async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const script = await fs.readFile(path.join(root,'cloudflare/worker.mjs'),'utf8');
+  assert.match(script,/CANDIDATES: <up to 3 plausible legal SAN moves/);
+  assert.match(script,/considered:choices/);
+  assert.match(script,/private reasoning/);
+  assert.match(script,/legalChoices=s\.moves\(\)/);
+});
+
 await test('frontend includes play-by-play navigation and engine opt-in', async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const html = await fs.readFile(path.join(root, 'public/index.html'), 'utf8');
   const js = await fs.readFile(path.join(root, 'public/app.js'), 'utf8');
   const css = await fs.readFile(path.join(root, 'public/style.css'), 'utf8');
-  for (const id of ['moveBackBtn','moveForwardBtn','moveLiveBtn','moveSlider','engineToggle','engineEval','engineBest','engineSpeed']) {
+  for (const id of ['moveBackBtn','moveForwardBtn','moveLiveBtn','moveSlider','engineToggle','engineEval','engineBest','engineSpeed','engineCandidates','moveQuality','decisionStatus','decisionTimer','openingName','gamePhase','modelCandidates']) {
     assert.ok(html.includes('id="' + id + '"'), id);
   }
-  assert.match(js, /worker\.postMessage\('go movetime 500'\)/);
+  assert.match(js, /worker\.postMessage\('go movetime 1100'\)/);
+  assert.match(js, /MultiPV value 3/);
+  assert.match(js, /Possible blunder/);
+  assert.match(js, /function openingAt/);
+  assert.match(js, /function renderDecision/);
   assert.match(js, /function renderPosition/);
   assert.match(js, /function stopStockfish/);
   assert.match(js, /searchParams.get\('analysis'\) === 'on'/);
@@ -84,5 +114,5 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   assert.match(css, /\.engine-details\[hidden\]/);
 });
 
-console.log((5 - failures) + '/5 Cloudflare adapter tests passed');
+console.log((7 - failures) + '/7 Cloudflare adapter tests passed');
 process.exitCode = failures ? 1 : 0;
