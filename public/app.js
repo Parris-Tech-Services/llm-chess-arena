@@ -943,6 +943,8 @@ if (location.pathname.startsWith('/g/')) {
   connect();
   setInterval(refreshKeys, 20000);
 }
+// Explicit analysis=on is a shareable, testable opt-in; normal visits remain lightweight.
+if (new URL(location.href).searchParams.get('analysis') === 'on') toggleStockfish();
 window.addEventListener('beforeunload', () => {
   if (es) es.close();
   if (pollTimer) clearInterval(pollTimer);

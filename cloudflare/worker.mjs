@@ -77,7 +77,7 @@ const ChessArenaWorker = {
       if (!CHESS_ENGINE_ASSETS.has(filename)) return new Response("Not found", {status:404});
       try {
         const upstream = await fetch(
-          "https://cdn.jsdelivr.net/npm/stockfish@" + CHESS_ENGINE_VERSION + "/bin/" + filename,
+          "https://unpkg.com/stockfish@" + CHESS_ENGINE_VERSION + "/bin/" + filename,
           {cf:{cacheEverything:true,cacheTtl:86400}},
         );
         if (!upstream.ok) throw new Error("upstream " + upstream.status);

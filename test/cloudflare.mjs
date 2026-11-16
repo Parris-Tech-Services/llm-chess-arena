@@ -58,8 +58,8 @@ await test('engine static proxy has correct JS and WASM types', async () => {
       await res.arrayBuffer();
     }
     assert.deepEqual(calls, [
-      'https://cdn.jsdelivr.net/npm/stockfish@19.0.1/bin/stockfish-19-lite-single.js',
-      'https://cdn.jsdelivr.net/npm/stockfish@19.0.1/bin/stockfish-19-lite-single.wasm',
+      'https://unpkg.com/stockfish@19.0.1/bin/stockfish-19-lite-single.js',
+      'https://unpkg.com/stockfish@19.0.1/bin/stockfish-19-lite-single.wasm',
     ]);
   } finally {
     globalThis.fetch = actualFetch;
@@ -76,6 +76,7 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   assert.match(js, /worker\.postMessage\('go movetime 500'\)/);
   assert.match(js, /function renderPosition/);
   assert.match(js, /function stopStockfish/);
+  assert.match(js, /searchParams.get\('analysis'\) === 'on'/);
 });
 
 console.log((5 - failures) + '/5 Cloudflare adapter tests passed');
