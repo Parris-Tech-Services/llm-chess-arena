@@ -20,16 +20,28 @@ Give mobile spectators a transparent, real-time view of **what the models public
 6. Merge CI-green PR, deploy versioned Worker to Cloudflare, verify actual HTTPS/mobile/browser outcomes and record limitations.
 
 ## Completion gates
-- [ ] All unit, integration, Cloudflare, Docker tests green.
-- [ ] GitHub main contains the code and this record.
-- [ ] Live /health and /api/state still preserve game state; binding IDs unchanged.
-- [ ] Browser displays named opening, current phase, a clock and three engine lines when analysis is on.
-- [ ] Model-reported candidates appear for newly played turns; old recorded games must not invent candidates.
-- [ ] Move-quality labels never appear without both engine evaluations.
-- [ ] No external credentials or hidden reasoning stored in client.
-- [ ] Mobile UI 390 px checked.
+- [x] All unit, integration, Cloudflare, Docker tests green (GitHub Actions run 43792611195).
+- [x] GitHub main contains the code and this record (PRs #8, #9, #10 merged).
+- [x] Live /health and browser /api/state respond; active AI/ARENA bindings and same Durable Object namespace were verified after deployment.
+- [x] Browser displays named opening (Italian Game: Two Knights Defense, Knight Attack, C57), phase, decision timer and 3 engine lines on a 390 px viewport.
+- [x] Complete simulated Durable Object + Workers AI turn verified legal public candidates persisted and illegal candidates removed; older games explicitly show 'Not recorded'. **Real new-turn provider output hasn't been observed live yet.**
+- [x] Move-quality display requires cached pre- and post-move evaluations at depth >= 9; live browser showed the estimated result after both analyses.
+- [x] Public UI uses public explanations and engine outputs only, no credentials or private model reasoning added to frontend.
+- [x] Browser Rendering on a 390 px mobile viewport checked; controls and engine analysis rendered.
 
 ## Remaining after this increment
 - **Delivered external comparison**: each viewed FEN links to 0x88.app's verified browser-based Lc0, Stockfish, Berserk, Reckless, PlentyChess and other engine comparison. The external tool runs its own engines; this Chess Arena does not claim they run inside its Worker or that any is universally stronger than Stockfish. Additional engines embedded in our own site still require verified browser/cloud compute and licensing.
 - Truly autonomous server-side engine multiPV analysis requires additional cloud compute; browser engine is spectator-local.
 - The Cloudflare frontend follows GitHub main; backend still needs deliberate source-upload deployment.
+
+## Deployment verification receipt — 16 November 2026
+
+- GitHub source / PRs: https://github.com/Parris-Tech-Services/llm-chess-arena/pulls?q=is%3Apr+is%3Amerged
+- CI: https://github.com/Parris-Tech-Services/llm-chess-arena/actions/runs/43792611195
+- Live site: https://llm-chess-arena.parris-neathaustralia.workers.dev/?analysis=on
+- Cloudflare Worker deployment: `682fb57e07a14dfd89e387dee3537268`. Same original `ARENA` Durable Object namespace `a0536b93df99444c826be12a671c9cbb`; `AI` binding remains attached.
+- Health recheck: `ok: true`, `cloudflare-durable-v2`, `cloudflare-ai`, existing completed game retained, phone not needed.
+- Live mobile analysis: ECO C57 and three Stockfish lines, depth 19; example reviewed game at ply 6 identified Italian Game: Giuoco Piano and the comparative engine deep link contained the exact FEN of move six.
+- Multi-engine: the Compare action opens `https://0x88.app/app/analysis/?fen=<encoded FEN>` in a new tab. Browser-rendered link was checked and targeted the currently reviewed FEN. 0x88 supports Lc0, Berserk, Reckless and more, but those run in that **external** app.
+- Candidate reporting: verified with a fully executed local Durable Object alarm using a mocked Workers AI response; no claim yet of actual new production model responses.
+- Rough move-quality evals and opening-family labels are aids, not certified accuracy scores or guaranteed classifications across transpositions.
