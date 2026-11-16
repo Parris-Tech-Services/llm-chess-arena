@@ -206,6 +206,7 @@ function renderPosition(animate = false) {
   const moveLabel = last ? `${Math.floor((index - 1) / 2) + 1}${last.side === 'w' ? '.' : '…'} ${last.san}` : 'Starting position';
   $('movePosition').textContent = `${index} / ${total} · ${moveLabel}${index < total ? ' · LIVE CONTINUES' : ' · Latest'}`;
   $('movePosition').classList.toggle('behind', index < total);
+  updateEnginePanel();
 }
 
 function renderStatus(state) {
@@ -790,6 +791,147 @@ async function initReplay(id) {
     $('board').innerHTML = `<div class="empty" style="grid-column:1/9;align-self:center">Could not load game ${esc(id)}: ${esc(err.message)}</div>`;
   }
 }
+
+
+/* ---------------------------------------------------------- local Stockfish */
+// Browser-only analysis: NEVER feeds moves back into the autonomous AI match.
+const ENGINE = {
+  enabled: false, ready: false, searching: false, worker: null,
+  currentFen: null, pendingFen: null, turn: 'w',
+  depth: 0, timer: null,
+};
+
+function currentViewFen() {
+  if (!S.state) return null;
+  const { fens, available } = moveHistory(S.state);
+  return available ? fens[viewedPly(S.state)] : S.state.fen;
+}
+
+function updateEnginePanel() {
+  if (S.state) {
+    const timed = S.state.moves.filter((m) => Number.isFinite(m.ms));
+    if (timed.length) {
+      const average = Math.round(timed.reduce((sum, m) => sum + m.ms, 0) / timed.length);
+      const last = timed[timed.length - 1];
+      const source = last.source && last.source !== 'llm' ? ' · ' + last.source.replaceAll('-', ' ') : '';
+      $('engineSpeed').textContent = 'Avg move: ' + (average / 1000).toFixed(1)
+        + 's · Last: ' + (last.ms / 1000).toFixed(1) + 's' + source;
+    }
+  }
+  if (!ENGINE.enabled || !ENGINE.ready) return;
+  const fen = currentViewFen();
+  if (!fen || fen === ENGINE.currentFen || fen === ENGINE.pendingFen) return;
+  ENGINE.pendingFen = fen;
+  if (ENGINE.searching) ENGINE.worker.postMessage('stop');
+  else engineAnalyzeNext();
+}
+
+function engineAnalyzeNext() {
+  if (!ENGINE.enabled || !ENGINE.ready || ENGINE.searching || !ENGINE.pendingFen) return;
+  ENGINE.currentFen = ENGINE.pendingFen;
+  ENGINE.pendingFen = null;
+  ENGINE.turn = ENGINE.currentFen.split(' ')[1] || 'w';
+  ENGINE.searching = true;
+  ENGINE.depth = 0;
+  $('engineEval').textContent = '…';
+  $('engineBest').textContent = 'Searching move ' + viewedPly(S.state) + '…';
+  $('engineDepth').textContent = 'Stockfish · calculating locally';
+  ENGINE.worker.postMessage('position fen ' + ENGINE.currentFen);
+  ENGINE.worker.postMessage('go movetime 500');
+}
+
+function onEngineLine(line) {
+  if (line === 'uciok') {
+    ENGINE.worker.postMessage('setoption name MultiPV value 1');
+    ENGINE.worker.postMessage('isready');
+    return;
+  }
+  if (line === 'readyok') {
+    ENGINE.ready = true;
+    clearTimeout(ENGINE.timer);
+    $('engineMessage').textContent = 'Stockfish runs on this device, independent of your live AI match.';
+    $('engineDetails').hidden = false;
+    ENGINE.pendingFen = currentViewFen();
+    engineAnalyzeNext();
+    return;
+  }
+  if (line.startsWith('info ') && ENGINE.searching && !ENGINE.pendingFen) {
+    const depth = Number(/\bdepth (\d+)/.exec(line)?.[1] || 0);
+    if (depth < ENGINE.depth) return;
+    const score = /\bscore (cp|mate) (-?\d+)/.exec(line);
+    const pv = /\bpv ([a-h][1-8][a-h][1-8][qrbn]?)/.exec(line);
+    if (!score) return;
+    ENGINE.depth = depth;
+    const raw = Number(score[2]) * (ENGINE.turn === 'b' ? -1 : 1);
+    $('engineEval').textContent = score[1] === 'mate'
+      ? (raw >= 0 ? 'M+' : 'M') + Math.abs(raw)
+      : (raw >= 0 ? '+' : '') + (raw / 100).toFixed(2);
+    if (pv) $('engineBest').textContent = 'Best: ' + pv[1].slice(0, 2) + ' → ' + pv[1].slice(2, 4);
+    $('engineDepth').textContent = 'Depth ' + depth + ' · White perspective';
+  }
+  if (line.startsWith('bestmove ')) {
+    ENGINE.searching = false;
+    if (ENGINE.pendingFen) {
+      engineAnalyzeNext();
+    } else if (ENGINE.enabled) {
+      const best = /^bestmove ([a-h][1-8][a-h][1-8][qrbn]?)/.exec(line)?.[1];
+      if (best) $('engineBest').textContent = 'Best: ' + best.slice(0, 2) + ' → ' + best.slice(2, 4);
+    }
+  }
+}
+
+function stopStockfish() {
+  ENGINE.enabled = false;
+  ENGINE.ready = false;
+  ENGINE.searching = false;
+  ENGINE.pendingFen = null;
+  ENGINE.currentFen = null;
+  clearTimeout(ENGINE.timer);
+  ENGINE.worker?.terminate();
+  ENGINE.worker = null;
+  $('engineToggle').textContent = 'Enable analysis';
+  $('engineToggle').setAttribute('aria-pressed', 'false');
+  $('engineDetails').hidden = true;
+  $('engineMessage').textContent = 'Analysis off. You can enable it for any live or saved position.';
+}
+
+async function toggleStockfish() {
+  if (ENGINE.enabled) { stopStockfish(); return; }
+  ENGINE.enabled = true;
+  $('engineToggle').textContent = 'Disable analysis';
+  $('engineToggle').setAttribute('aria-pressed', 'true');
+  $('engineMessage').textContent = 'Loading Stockfish Lite… (around 2 MB, once cached)';
+  try {
+    const check = await fetch('/engine/manifest', { cache: 'no-store' });
+    if (!check.ok) throw new Error('This host does not provide browser Stockfish');
+    const manifest = await check.json();
+    if (!manifest.available) throw new Error('Browser engine unavailable on this host');
+    if (!ENGINE.enabled) return;
+    ENGINE.worker = new Worker('/engine/stockfish-19-lite-single.js');
+    ENGINE.worker.onmessage = (event) => {
+      const lines = String(event.data || '').split(/\r?\n/);
+      for (const line of lines) if (line) onEngineLine(line.trim());
+    };
+    ENGINE.worker.onerror = (event) => {
+      const message = event.message || 'Engine file could not be loaded';
+      stopStockfish();
+      $('engineMessage').textContent = 'Stockfish unavailable: ' + message;
+    };
+    ENGINE.timer = setTimeout(() => {
+      if (ENGINE.enabled && !ENGINE.ready) {
+        stopStockfish();
+        $('engineMessage').textContent = 'Stockfish did not start. Check your connection, then retry.';
+      }
+    }, 20000);
+    ENGINE.worker.postMessage('uci');
+  } catch (error) {
+    stopStockfish();
+    $('engineMessage').textContent = 'Stockfish unavailable: ' + error.message;
+  }
+}
+
+$('engineToggle').onclick = toggleStockfish;
+window.addEventListener('pagehide', () => ENGINE.worker?.terminate());
 
 /* ---------------------------------------------------------------------- boot */
 savePrefs();
