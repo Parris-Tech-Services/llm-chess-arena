@@ -341,3 +341,6 @@ table.tbl tr:first-child td:first-child { color: var(--accent); font-weight: 700
 .engine-details { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font: 12px/1.5 var(--mono); }
 .engine-eval { background: var(--bg2); border: 1px solid var(--line); border-radius: 7px; font-size: 16px; font-weight: 800; min-width: 55px; text-align: center; padding: 3px 7px; }
 .engine-panel .hint { margin: 0; }
+
+/* Respect the hidden attribute even when the details are a flex row. */
+.engine-details[hidden] { display: none !important; }

@@ -213,7 +213,7 @@ function renderPosition(animate = false) {
   $('moveLiveBtn').disabled = !available || S.viewPly === null;
   const last = moves[index - 1];
   const moveLabel = last ? `${Math.floor((index - 1) / 2) + 1}${last.side === 'w' ? '.' : '…'} ${last.san}` : 'Starting position';
-  $('movePosition').textContent = `${index} / ${total} · ${moveLabel}${index < total ? ' · LIVE CONTINUES' : ' · Latest'}`;
+  $('movePosition').textContent = `${index} / ${total} · ${moveLabel}${index < total ? (S.state.status === 'playing' ? ' · LIVE CONTINUES' : ' · REPLAYING') : ' · Latest'}`;
   $('movePosition').classList.toggle('behind', index < total);
   updateEnginePanel();
 }
