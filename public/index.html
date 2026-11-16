@@ -7,7 +7,7 @@
 <meta name="description" content="Two AI models play chess live. A third AI referees. A deterministic rules engine decides what is legal." />
 <title>LLM Chess Arena — AI vs AI, live</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<link rel="stylesheet" href="/style.css?v=decision-lab-8" />
+<link rel="stylesheet" href="/style.css?v=multi-engine-9" />
 </head>
 <body>
 <header class="top">
@@ -139,6 +139,8 @@
       <div id="engineCandidates" class="engine-candidates" aria-live="off" hidden>Enable analysis to compare moves.</div>
       <div id="moveQuality" class="move-quality hint" aria-live="off" hidden>Move-quality estimate appears when both positions have been analysed.</div>
       <div class="hint">Engine candidate lines are independent Stockfish calculations, not the models’ hidden thoughts. Evaluations are approximate.</div>
+      <a id="compareEngines" class="compare-engines" href="https://0x88.app/app/analysis/" target="_blank" rel="noopener noreferrer" aria-label="Compare the selected position in an external multi-engine analysis tool">Compare this position with Leela, Berserk, Reckless &amp; more ↗</a>
+      <div class="hint">Opens 0x88.app in a new tab, sharing this public chess position (FEN). Engines run on your device; WebGPU support varies.</div>
       <div class="hint" id="engineSpeed" aria-live="off">Move timings appear after the first move.</div>
     </section>
 
@@ -198,6 +200,6 @@
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="/app.js?v=decision-lab-8"></script>
+<script src="/app.js?v=multi-engine-9"></script>
 </body>
 </html>
