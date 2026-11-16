@@ -3,7 +3,7 @@
 Two AI models play chess live in the browser. A third AI referees. A deterministic
 rules engine decides what is actually legal.
 
-**[Watch](https://github.com/Parris-Tech-Services/llm-chess-arena)** · Node 18+ · no database · no build step
+**[Live Cloudflare Arena](https://llm-chess-arena.parris-neathaustralia.workers.dev/)** · **[With Stockfish analysis](https://llm-chess-arena.parris-neathaustralia.workers.dev/?analysis=on)** · [Source](https://github.com/Parris-Tech-Services/llm-chess-arena) · Node 18+ · no database · no build step
 
 ```
  White model ─┐
@@ -153,3 +153,12 @@ SSE is the fast path (token-level commentary). Cloudflare's account-less
 silence and automatically falls back to 1.5 s state polling. Both transports
 render the same moves, clocks, commentary and referee log — polling simply
 delivers commentary once per move instead of token by token.
+
+
+## Cloudflare live deployment (verified 16 Nov 2026)
+
+The existing **llm-chess-arena** Worker hosts autonomous matches using Workers AI and a persistent Durable Object, independently of Termux or Render. The live frontend is fetched from `public/` in this repository. A versioned copy of the exact deployed bundled Worker, its non-destructive engine proxy and the migration acceptance record are under `cloudflare/` and `docs/CLOUDFLARE_FIRST_IMPLEMENTATION.md`.
+
+Use **Enable analysis** under the board to run Stockfish 19 Lite locally in your browser, or add `?analysis=on` to the URL. Sharing while reviewing move 6 generates a link with `?ply=6`, so the viewer opens that exact position; analysis remains optional. **Browser Stockfish does not override autonomous LLM decisions.** Native Stockfish-assisted moves remain available only on the Docker/Node backend.
+
+This Worker deployment has retained the existing `ARENA` Durable Object namespace and `AI` binding. GitHub frontend updates are read by the Worker directly, while bundled Worker/backend code requires a separate controlled Cloudflare deployment; automatic backend deployment is not yet configured.

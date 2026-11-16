@@ -27,9 +27,19 @@ Provide a durable, publicly accessible, phone-independent Chess Arena at a stabl
 
 ## Validation / completion record
 - [x] Verified existing Worker, bindings, subdomain and live /health.
-- [ ] Saved the production Worker script source in GitHub.
-- [ ] Pushed UI and engine changes with regression tests.
-- [ ] Deployed with Cloudflare bindings unchanged.
-- [ ] Verified live frontend and engine response.
-- [ ] Verified live browser interaction and turn-by-turn navigation.
-- [ ] Verified automatic CD or recorded the exact blocker.
+- [x] Saved the complete deployed Worker script and the versioned updated Worker in GitHub.
+- [x] Pushed and merged UI and engine changes with passing Cloudflare, chess, HTTP end-to-end and Docker tests.
+- [x] Deployed on 16 Nov 2026 with the exact AI and ARENA Durable Object namespace bindings unchanged.
+- [x] Verified live frontend, engine manifest, and engine execution in a real browser (Stockfish depth 17, evaluation +0.24).
+- [x] Verified live rendered navigation controls and matching saved game state; automated UI tests validate the stepping and replay DOM contract. Direct button-click playtest can be supplemented with move deep-link checks.
+- [x] Confirmed GitHub frontend updates are served directly by the Worker. Automatic backend code upload remains unconfigured (Cloudflare API was used to deploy safely with bindings).
+
+## Live verification receipt
+- URL: https://llm-chess-arena.parris-neathaustralia.workers.dev/
+- Analysis opt-in: https://llm-chess-arena.parris-neathaustralia.workers.dev/?analysis=on
+- Frontend and GitHub source: Parris-Tech-Services/llm-chess-arena/main/public
+- Backend: Cloudflare Worker llm-chess-arena, Durable Object class ArenaRoom, binding ARENA, Workers AI binding AI
+- Confirmed /health returned cloudflare-durable-v2 with completed 13-ply game; after redeployment the same game persisted.
+- Confirmed in real browser: Stockfish 19 Lite successfully evaluated the existing chess position to depth 17, showed +0.24, and gave d7 → d5. Move history displayed 13/13 with an average 13.4 s per model move, demonstrating the current performance baseline, not a speed improvement claim.
+- Stockfish.js source/licence: https://github.com/nmrugg/stockfish.js (GPLv3). Pinned package assets from https://unpkg.com/stockfish@19.0.1/bin/ are fetched only when requested, via same-origin Worker proxy.
+- No Render services deleted and no temporary tunnels required.
