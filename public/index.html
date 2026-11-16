@@ -7,7 +7,7 @@
 <meta name="description" content="Two AI models play chess live. A third AI referees. A deterministic rules engine decides what is legal." />
 <title>LLM Chess Arena — AI vs AI, live</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<link rel="stylesheet" href="/style.css?v=cloudflare-stockfish-5" />
+<link rel="stylesheet" href="/style.css?v=decision-lab-8" />
 </head>
 <body>
 <header class="top">
@@ -63,8 +63,8 @@
         <label for="engineMode">Chess strength</label>
         <select id="engineMode" aria-describedby="engineHelp">
           <option value="pure" selected>Pure LLM vs LLM</option>
-          <option value="assisted">Stockfish-assisted LLM (top 3)</option>
-          <option value="engine">Stockfish only (fast)</option>
+          <option value="assisted">Stockfish-assisted LLM (Node host only)</option>
+          <option value="engine">Stockfish-only match (Node host only)</option>
         </select>
         <p id="engineHelp" class="hint">Pure LLM: no engine guidance. Assisted: models choose from Stockfish's top three; unsafe choices are replaced and labelled.</p>
       </div>
@@ -106,6 +106,25 @@
       <span id="movePosition" class="move-position" role="status" aria-live="polite">Starting position</span>
     </nav>
 
+    <section class="decision-lab" aria-label="Live decisions and opening">
+      <div class="decision-title"><strong>Live decision desk</strong><span id="decisionStatus" class="decision-status">Ready</span></div>
+      <div class="decision-thinking">
+        <span id="decisionModel">Models preparing…</span>
+        <strong id="decisionTimer" class="decision-timer">—</strong>
+      </div>
+      <p class="hint" id="decisionNote">The model's private reasoning isn't available; public move explanations appear after each decision.</p>
+      <div class="decision-opening">
+        <small>OPENING · GAME PHASE</small>
+        <div><strong id="openingName">Identifying opening…</strong> <span id="gamePhase" class="phase">Opening</span></div>
+        <div class="hint" id="openingInfo">Source: Lichess opening database (ECO)</div>
+      </div>
+      <div class="decision-reported">
+        <small>MODEL-REPORTED CANDIDATES</small>
+        <div id="modelCandidates">Appear after a model voluntarily lists legal alternatives.</div>
+        <div id="modelExplain" class="hint">These are public chess notes, not a live transcript of private model reasoning.</div>
+      </div>
+    </section>
+
     <section class="engine-panel" id="enginePanel" aria-label="Local chess engine analysis">
       <div class="engine-head">
         <span class="engine-heading">♞ Stockfish analysis <small>on this device</small></span>
@@ -117,6 +136,9 @@
         <span id="engineBest">Best move: —</span>
         <span id="engineDepth" class="hint">Waiting for engine</span>
       </div>
+      <div id="engineCandidates" class="engine-candidates" aria-live="off" hidden>Enable analysis to compare moves.</div>
+      <div id="moveQuality" class="move-quality hint" aria-live="off" hidden>Move-quality estimate appears when both positions have been analysed.</div>
+      <div class="hint">Engine candidate lines are independent Stockfish calculations, not the models’ hidden thoughts. Evaluations are approximate.</div>
       <div class="hint" id="engineSpeed" aria-live="off">Move timings appear after the first move.</div>
     </section>
 
@@ -176,6 +198,6 @@
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="/app.js?v=cloudflare-stockfish-5"></script>
+<script src="/app.js?v=decision-lab-8"></script>
 </body>
 </html>
