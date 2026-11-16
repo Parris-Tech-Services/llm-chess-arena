@@ -133,7 +133,7 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   const html = await fs.readFile(path.join(root, 'public/index.html'), 'utf8');
   const js = await fs.readFile(path.join(root, 'public/app.js'), 'utf8');
   const css = await fs.readFile(path.join(root, 'public/style.css'), 'utf8');
-  for (const id of ['moveBackBtn','moveForwardBtn','moveLiveBtn','moveSlider','engineToggle','engineEval','engineBest','engineSpeed','engineCandidates','moveQuality','decisionStatus','decisionTimer','openingName','gamePhase','modelCandidates']) {
+  for (const id of ['moveBackBtn','moveForwardBtn','moveLiveBtn','moveSlider','engineToggle','engineEval','engineBest','engineSpeed','engineCandidates','moveQuality','compareEngines','decisionStatus','decisionTimer','openingName','gamePhase','modelCandidates']) {
     assert.ok(html.includes('id="' + id + '"'), id);
   }
   assert.match(js, /worker\.postMessage\('go movetime 1100'\)/);
@@ -141,6 +141,8 @@ await test('frontend includes play-by-play navigation and engine opt-in', async 
   assert.match(js, /Possible blunder/);
   assert.match(js, /function openingAt/);
   assert.match(js, /function renderDecision/);
+  assert.match(js, /0x88\.app\/app\/analysis\/\?fen=/);
+  assert.match(js, /encodeURIComponent\(selectedFen\)/);
   assert.match(js, /function renderPosition/);
   assert.match(js, /function stopStockfish/);
   assert.match(js, /searchParams.get\('analysis'\) === 'on'/);

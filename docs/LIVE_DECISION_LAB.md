@@ -30,6 +30,6 @@ Give mobile spectators a transparent, real-time view of **what the models public
 - [ ] Mobile UI 390 px checked.
 
 ## Remaining after this increment
-- Lc0/other UCI engines: require verified browser/cloud compute and licensing; plan separate opt-in engine comparison, not an unsupported 'stronger than Stockfish' claim.
+- **Delivered external comparison**: each viewed FEN links to 0x88.app's verified browser-based Lc0, Stockfish, Berserk, Reckless, PlentyChess and other engine comparison. The external tool runs its own engines; this Chess Arena does not claim they run inside its Worker or that any is universally stronger than Stockfish. Additional engines embedded in our own site still require verified browser/cloud compute and licensing.
 - Truly autonomous server-side engine multiPV analysis requires additional cloud compute; browser engine is spectator-local.
 - The Cloudflare frontend follows GitHub main; backend still needs deliberate source-upload deployment.

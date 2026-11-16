@@ -381,3 +381,6 @@ table.tbl tr:first-child td:first-child { color: var(--accent); font-weight: 700
   .decision-lab,.engine-panel {padding:10px;gap:8px;}
   .engine-line {grid-template-columns:18px minmax(0,1fr) auto;padding:6px;}
 }
+
+.compare-engines {display:block;padding:9px 10px;border:1px solid var(--accent-dim);border-radius:9px;background:var(--bg2);color:var(--accent);font-size:13px;font-weight:700;line-height:1.4;text-align:center;}
+.compare-engines:hover,.compare-engines:focus-visible {background:var(--accent-dim);color:var(--text);}

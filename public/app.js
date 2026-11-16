@@ -983,6 +983,9 @@ function renderMoveQuality() {
   box.hidden = false;
 }
 function updateEnginePanel() {
+  const compare = $('compareEngines');
+  const selectedFen = currentViewFen();
+  if (compare && selectedFen) compare.href = 'https://0x88.app/app/analysis/?fen=' + encodeURIComponent(selectedFen);
   if (S.state) {
     const timed = S.state.moves.filter((m) => Number.isFinite(m.ms));
     if (timed.length) {
